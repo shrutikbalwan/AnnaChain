@@ -18,8 +18,8 @@ Everything in this repository exists to make that sentence demonstrable.
 You have not ordered parts yet. You do not need them to start.
 
 ```bash
-g++ -std=gnu++17 -DSH_LOG_CAPACITY=4096 -Ilib/ac lib/ac/*.cpp native/main.cpp -o sh
-./sh
+g++ -std=gnu++17 -DAC_LOG_CAPACITY=4096 -DAC_NATIVE=1 -Ilib/ac lib/ac/*.cpp native/main.cpp -o demo
+./demo
 ```
 
 or, with PlatformIO installed:
@@ -36,7 +36,7 @@ you can watch the chain break at exactly that record.
 **Run the tests too.** They are the deck's claims, written as assertions:
 
 ```bash
-g++ -std=gnu++17 -DSH_LOG_CAPACITY=4096 -Ilib/ac lib/ac/*.cpp tools/selftest.cpp -o t && ./t
+g++ -std=gnu++17 -DAC_LOG_CAPACITY=4096 -Ilib/ac lib/ac/*.cpp tools/selftest.cpp -o t && ./t
 ```
 
 113 checks, including a power cut in the middle of the outage, a link that dies

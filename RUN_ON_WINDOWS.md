@@ -23,8 +23,8 @@ g++ --version
 If that prints a version, you are ready. Now:
 
 ```powershell
-g++ -std=gnu++17 -DSH_LOG_CAPACITY=4096 -Ilib/ac `
-    lib/ac/ac_sha256.cpp lib/ac/ac_record.cpp lib/ac/ac_node.cpp lib/ac/ac_sim.cpp `
+g++ -std=gnu++17 -DAC_LOG_CAPACITY=4096 -Ilib/ac `
+    lib/ac/ac_sha256.cpp lib/ac/ac_record.cpp lib/ac/ac_node.cpp lib/ac/ac_gateway.cpp lib/ac/ac_sim.cpp `
     native/main.cpp -o demo.exe
 .\demo.exe
 ```
@@ -32,8 +32,8 @@ g++ -std=gnu++17 -DSH_LOG_CAPACITY=4096 -Ilib/ac `
 and the tests:
 
 ```powershell
-g++ -std=gnu++17 -DSH_LOG_CAPACITY=4096 -Ilib/ac `
-    lib/ac/ac_sha256.cpp lib/ac/ac_record.cpp lib/ac/ac_node.cpp lib/ac/ac_sim.cpp `
+g++ -std=gnu++17 -DAC_LOG_CAPACITY=4096 -Ilib/ac `
+    lib/ac/ac_sha256.cpp lib/ac/ac_record.cpp lib/ac/ac_node.cpp lib/ac/ac_gateway.cpp lib/ac/ac_sim.cpp `
     tools/selftest.cpp -o selftest.exe
 .\selftest.exe
 ```
