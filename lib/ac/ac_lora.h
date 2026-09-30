@@ -17,9 +17,15 @@
 //   0xAC FRAME_GAP     + 84 bytes   a signed gap notice (ac_record.h)
 //   0xAC FRAME_ACK     + device 4 + seq 4    gateway -> node, hop-by-hop
 //   0xAC FRAME_QUERY   + device 4            node -> gateway: what does the server have?
-//   0xAC FRAME_LASTACK + device 4 + known 1 + seq 4
+//   0xAC FRAME_LASTACK + device 4 + known 1 + seq 4 + time 4
 //                                            gateway -> node: the server's last-ACK,
-//                                            or known = 0 for "no value" (ac_gateway.h)
+//                                            or known = 0 for "no value" (ac_gateway.h),
+//                                            and the time (unix, 0 = none) the node
+//                                            sets its clock from. A node also takes
+//                                            the older 9-byte form, without time. A
+//                                            node flashed before the time field
+//                                            existed takes only the 9-byte form, so
+//                                            flash node and gateway together.
 // The radio carries bytes; it never interprets a record. Same rule as the
 // gateway: a compromised hop can delay or drop, not invent.
 //
@@ -82,7 +88,7 @@ class LoraRadio : public IGatewayRadio {
   bool begin() override { return t_.begin() == 0; }
   bool receive(uint8_t frame[kRecBytes], uint8_t& kind, int16_t& rssi) override;
   bool ack(uint32_t device, uint32_t seq) override;
-  bool lastAck(uint32_t device, bool known, uint32_t seq) override;
+  bool lastAck(uint32_t device, bool known, uint32_t seq, uint32_t unixNow) override;
  private:
   Sx1262Transport& t_;
 };
@@ -97,11 +103,17 @@ class LoraNodeLink : public ILink {
       : t_(t), timeout_(ackTimeoutMs), tries_(tries) {}
   bool up() override { return up_ && t_.ready(); }
   bool queryLastAck(uint32_t device, uint32_t& lastAck) override;
+  bool serverTime(uint32_t& unixNow) override {
+    if (!time_) return false;
+    unixNow = time_;
+    return true;
+  }
   bool send(const uint8_t* recs, size_t count, uint32_t& acked) override;
   bool declareGap(uint32_t device, uint32_t from, uint32_t to,
                   const uint8_t mac[32]) override;
   void setUp(bool u) { up_ = u; }
  private:
+  uint32_t time_ = 0;
   bool sendFrame(uint8_t kind, const uint8_t frame[kRecBytes], uint32_t device, uint32_t seq);
   Sx1262Transport& t_;
   uint32_t timeout_;

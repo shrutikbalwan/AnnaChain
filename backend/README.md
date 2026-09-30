@@ -348,7 +348,9 @@ accurate.
 - **Ethylene is simulated only when asked for, and then it says so** (done).
   The capture tools default to "not fitted", like the board. With `--ethylene`
   the simulator invents a curve, and every such record carries
-  `FLAG_SIMULATED` (bit 6, 0x40), inside the signature. The dashboard badges
+  `FLAG_SIMULATED` (bit 6, 0x40), inside the signature. (Bit 7, 0x80, is
+  `FLAG_TIMEUNSET`: a record taken before the node was told the time; see
+  docs/HIL.md step 1.) The dashboard badges
   them SIMULATED under the ethylene chart, and the buyer's page counts them
   with the same badge. The flag covers the invented ethylene only: the mock
   temperatures of `node_mock`, `dump` and `fleet` are not flagged.

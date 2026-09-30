@@ -48,7 +48,7 @@ static Sx1262Transport radioHw(pins::kLoraNss, pins::kLoraDio1, pins::kLoraReset
                                pins::kLoraBusy, pins::kLoraSck, pins::kLoraMiso,
                                pins::kLoraMosi);
 static LoraRadio    lora(radioHw);
-static NtpClock     clk(kClockBase);            // compiled-in date until NTP answers
+static NtpClock     clk(kClockBase);            // build time until NTP answers
 static GwBuffer     buffer(kBufferRecs);
 static WifiHttpLink wifiUp(AC_SERVER_URL);
 static SerialLink   serialUp(Serial);           // the bench fallback
@@ -68,7 +68,7 @@ static void banner() {
   Serial.printf("\n# AnnaChain gateway %08X\n", kGatewayId);
   Serial.printf("# uplink: %s  ·  clock: %s\n",
                 kUseWifi ? "Wi-Fi HTTP (UNPROVEN)" : "USB serial",
-                clk.synced() ? "NTP" : "compiled-in date (not synced)");
+                clk.synced() ? "NTP" : "build time + uptime (not synced)");
   Serial.printf("# LoRa: SX1262 %s (UNPROVEN driver)\n", radioHw.ready() ? "up" : "NOT READY");
   Serial.printf("# buffer %u frames · holding %u · dropped %u records, %u gap notices\n",
                 buffer.capacity(), gw.buffered(), s.dropped, s.gapsDropped);
@@ -87,7 +87,7 @@ void setup() {
   if (kUseWifi) {
     if (wifiConnect(AC_WIFI_SSID, AC_WIFI_PASS)) {
       Serial.printf("# Wi-Fi up, %s\n", WiFi.localIP().toString().c_str());
-      if (!clk.sync()) Serial.println("# NTP did not answer; using the compiled-in date");
+      if (!clk.sync()) Serial.println("# NTP did not answer; using the build time + uptime");
     } else {
       Serial.println("# Wi-Fi did not connect; will keep buffering");
     }

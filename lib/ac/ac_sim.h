@@ -16,14 +16,22 @@
 namespace ac {
 
 // ── clock you can fast-forward ────────────────────────────────────────────
+// By default it is a wall clock that is already set: the simulators (demo,
+// dump, fleet) start it at an explicit trip time and every record they make is
+// wall-clock time, as before. SimClock(t, false) is a board that has just
+// powered up: uptime counted from t, until set() is called.
 class SimClock : public IClock {
  public:
-  explicit SimClock(uint32_t start) : t_(start) {}
+  explicit SimClock(uint32_t start, bool isSet = true) : t_(start), set_(isSet) {}
   uint32_t now() override { return t_; }
   void sleep(uint32_t ms) override { t_ += ms / 1000; }
+  bool isSet() const override { return set_; }
+  void set(uint32_t unixNow) override { t_ = unixNow; set_ = true; }
+  void atLeast(uint32_t t) override { if (t_ < t) t_ = t; }
   void advance(uint32_t sec) { t_ += sec; }
  private:
   uint32_t t_;
+  bool set_;
 };
 
 // ── a plausible cold chain, not a random number generator ────────────────
@@ -118,6 +126,15 @@ class SimLink : public ILink {
   SimLink(SimServer& srv, ISigner& signer) : srv_(srv), signer_(signer) {}
   bool up() override { return up_; }
   bool queryLastAck(uint32_t device, uint32_t& lastAck) override;
+  // The server's time comes with its last-ACK, as /api/lastack and the serial
+  // bridge's "A <seq> <time>" give it. Without a clock the answer carries none,
+  // which is how every simulator behaved before (and still does).
+  bool serverTime(uint32_t& unixNow) override {
+    if (!clock_ || !timed_) return false;
+    unixNow = clock_->now();
+    return true;
+  }
+  void setServerClock(IClock* c) { clock_ = c; }
   bool send(const uint8_t* recs, size_t count, uint32_t& acked) override;
   bool declareGap(uint32_t device, uint32_t from, uint32_t to,
                   const uint8_t mac[32]) override;
@@ -129,7 +146,8 @@ class SimLink : public ILink {
  private:
   SimServer& srv_;
   ISigner&   signer_;
-  bool up_ = true, dropOnce_ = false;
+  IClock*    clock_ = nullptr;
+  bool up_ = true, dropOnce_ = false, timed_ = false;
   uint32_t bytes_ = 0;
 };
 
@@ -145,11 +163,11 @@ class SimRadio : public IGatewayRadio {
     acks_.push_back({device, seq});
     return true;
   }
-  bool lastAck(uint32_t device, bool known, uint32_t seq) override {
-    replies_.push_back({device, known, seq});
+  bool lastAck(uint32_t device, bool known, uint32_t seq, uint32_t unixNow) override {
+    replies_.push_back({device, known, seq, unixNow});
     return true;
   }
-  struct Reply { uint32_t device; bool known; uint32_t seq; };
+  struct Reply { uint32_t device; bool known; uint32_t seq; uint32_t time; };
   const std::vector<Reply>& replies() const { return replies_; }
 
   // called by the node side
@@ -191,6 +209,12 @@ class SimNodeToGateway : public ILink {
   explicit SimNodeToGateway(SimRadio& r) : radio_(r) {}
   bool up() override { return up_; }
   bool queryLastAck(uint32_t device, uint32_t& lastAck) override;
+  // The time the gateway put in its FRAME_LASTACK answer (0 = none).
+  bool serverTime(uint32_t& unixNow) override {
+    if (!time_) return false;
+    unixNow = time_;
+    return true;
+  }
   bool send(const uint8_t* recs, size_t count, uint32_t& acked) override;
   // The signed notice goes over LoRa like a record, and the gateway carries
   // it upstream in its place in the queue.
@@ -204,6 +228,7 @@ class SimNodeToGateway : public ILink {
   bool runs_ = false;
   bool up_ = true;
   uint32_t ack_ = 0;
+  uint32_t time_ = 0;
 };
 
 // ── the secure element, in software ───────────────────────────────────────

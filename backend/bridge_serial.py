@@ -19,6 +19,11 @@ the board is the antenna being pulled.
     node -> T <dev> <assign|tap> <uid> <time>  a PN532 tap: becomes a checkpoint
     node -> # ...                human-readable chatter, echoed, not parsed
     us   -> A <seq>              accepted up to here
+    us   -> A <seq> <unix>       the answer to Q: last-ACK and the server's clock,
+                                 which is how the node learns the time. A board
+                                 that predates the time field reads <seq> with
+                                 toInt(), which stops at the space, so it is
+                                 unaffected. An unknown device gets "A 0", no time.
     us   -> N <reason>           refused
 """
 import argparse, json, sys, urllib.request, urllib.error
@@ -94,7 +99,8 @@ def main(argv=None):
                 dev = int(line.split()[1])
                 try:
                     r = call(a.base, f"/api/lastack/{dev}", method="GET")
-                    reply(f"A {r['last_ack']}")
+                    now = r.get("now")          # an older server sends none
+                    reply(f"A {r['last_ack']} {now}" if now else f"A {r['last_ack']}")
                 except urllib.error.HTTPError:
                     reply("A 0")          # unknown device: start from the beginning
 

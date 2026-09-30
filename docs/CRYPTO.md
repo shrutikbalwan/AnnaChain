@@ -76,6 +76,23 @@ gateway buffer slots (`kRecBytes`, typed by the frame kind byte beside them).
 A later format needs its own frame kind and its own slot size; it does not
 share v1's.
 
+## The flags byte is full
+
+`FLAG_TIMEUNSET` (1 Oct 2026, bit 7) took the last free bit of v1's one-byte
+`flags`. Bits 0–7 are now tamper, moved, charging, cold, selftest, sensor bad,
+simulated and time unset. The next thing a record needs to say has nowhere to
+go in v1: that is one more reason to make v2 below, and v2 should widen the
+flags to two bytes while it is changing the layout anyway.
+
+## The time is not signed
+
+A node sets its clock from the time that comes with its last-ACK (docs/HIL.md
+step 1). Nothing signs that time: the bridge, the gateway or the network can
+shift it. What bounds the damage is that the node never steps backwards and the
+server's check 5 (60 s ahead, 30 days behind). A server-signed time (the node
+checks a signature over `(device, seq, now)` with a server public key) needs
+ECDSA verification on the node; it belongs with v2.
+
 ## The migration, specified (not built)
 
 Format **v2**, ECDSA P-256:

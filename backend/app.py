@@ -43,7 +43,7 @@ async def lifespan(app):
     db.init()
     for d in db.devices():
         verifier.load(d["device_id"], d["last_ack"], d["tip_digest"], d["anchor_next"],
-                      d["last_ts"])
+                      d["last_ts"], d["clock_set"])
     throttle.load()
     engine.load()
     if db.user_count() == 0:
@@ -224,7 +224,7 @@ def register(reg: Registration, who: str = Depends(operator)):
 
     d = db.device(reg.device)
     verifier.load(reg.device, d["last_ack"], d["tip_digest"], d["anchor_next"],
-                  d["last_ts"])
+                  d["last_ts"], d["clock_set"])
     if not db.shipment_for(reg.device):
         db.upsert_shipment(f"AC-{reg.device:08X}", reg.device)
     return {"ok": True, "device": reg.device, "last_ack": d["last_ack"]}
@@ -264,11 +264,16 @@ def set_calibration(device: int, cal: Calibration, who: str = Depends(operator))
 
 @app.get("/api/lastack/{device}")
 def last_ack(device: int):
-    """What the server already holds. The node sends only what comes after."""
+    """What the server already holds. The node sends only what comes after.
+
+    `now` is the server's clock, and it is how a node learns the time: the node
+    has no clock of its own until this answer arrives (P1; lib/ac/ac_node.cpp).
+    The serial bridge passes it down as "A <seq> <now>", the gateway in its
+    FRAME_LASTACK answer."""
     d = db.device(device)
     if not d:
         raise HTTPException(404, "unknown device")
-    return {"device": device, "last_ack": d["last_ack"]}
+    return {"device": device, "last_ack": d["last_ack"], "now": int(time.time())}
 
 
 @app.post("/api/ingest")
@@ -351,7 +356,7 @@ def ingest(body: Ingest):
             tip = verifier.tip.get(d)
             db.set_tip(d, verifier.ack[d], tip.hex() if tip else None,
                        int(verifier.anchor_next.get(d, False)),
-                       verifier.last_ts.get(d))
+                       verifier.last_ts.get(d), d in verifier.clock_set)
         db.commit()
 
         for d, ts in touched.items():
@@ -490,6 +495,7 @@ def state(device: int | None = None, who: str = Depends(operator)):
         "lag": r["lag_s"], "f": r["flags"],
         "u": bool(r["uncertified"]),      # check 7: calibration had lapsed
         "sim": bool(r["flags"] & checks.FLAG_SIMULATED),   # an invented value
+        "tu": bool(r["flags"] & checks.FLAG_TIMEUNSET),    # ts relative to power-up
     } for r in rows]
 
     recovered = db.conn().execute(
@@ -510,6 +516,7 @@ def state(device: int | None = None, who: str = Depends(operator)):
         "recovered": recovered,
         "declared_lost": lost,
         "simulated": sum(1 for p in series if p["sim"]),
+        "time_unset": sum(1 for p in series if p["tu"]),
         "series": series,
         "alerts": [dict(a) for a in db.alerts(30, device_id=device)],
         "rejects": [dict(x) for x in db.rejects(10)],
@@ -914,6 +921,9 @@ def trace(shipment_id: str):
         "minutes_out": len(out_of_range) * step_s // 60,
         "sensor_faults": len(rows) - len(good),
         "simulated_readings": sum(1 for r in rows if r["flags"] & checks.FLAG_SIMULATED),
+        # FLAG_TIMEUNSET: taken before the node was told the time; the time
+        # shown for these is relative to power-up, not wall clock.
+        "time_unset_readings": sum(1 for r in rows if r["flags"] & checks.FLAG_TIMEUNSET),
         "declared_lost": lost,
         "gaps": [{"from": g["from_seq"], "to": g["to_seq"]} for g in gaps],
         "chain_ok": v["ok"],
@@ -926,7 +936,8 @@ def trace(shipment_id: str):
         "series": [{"seq": r["seq"], "ts": r["ts"],
                     "t": None if (r["flags"] & checks.FLAG_SENSORBAD) else r["temp_c"],
                     "late": r["lag_s"] > 0,
-                    "sim": bool(r["flags"] & checks.FLAG_SIMULATED)} for r in rows],
+                    "sim": bool(r["flags"] & checks.FLAG_SIMULATED),
+                    "tu": bool(r["flags"] & checks.FLAG_TIMEUNSET)} for r in rows],
     }
 
 

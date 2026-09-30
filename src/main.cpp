@@ -35,7 +35,7 @@ static const uint32_t kDeviceId = 0x26232001;   // per node; must be enrolled se
 static const uint32_t kSampleMs = 5000;         // 5 s on the bench; 300000 in the field
 
 // ── the pieces ────────────────────────────────────────────────────────────
-static ArduinoClock  clk(kClockBase);            // 25 Sep 2026; set properly from the server
+static ArduinoClock  clk(kClockBase);            // build time; set from the server's last-ACK answer
 static LittleFsStore store(AC_LOG_CAPACITY);
 static EspSoftSigner signer;
 

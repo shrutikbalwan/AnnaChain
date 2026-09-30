@@ -158,22 +158,78 @@ the held records arrive in one batch (`+ <n>`), drawn late in orange.
 
 **How it goes wrong**
 
-1. **Every record refused: `timestamp went backwards`**, after the board was
-   reset or re-flashed. The node's clock is `kClockBase` (25 Sep 2026 00:00 UTC)
-   plus seconds since boot; nothing sets it from the server. A reset restarts
-   the clock, so the next record is earlier than the last one the server
-   accepted, and check 5 refuses it — and every one after it. Clear the server
-   database *and* type `wipe` on the node, or keep the board powered for the
-   whole demo.
-2. **Every record refused: `timestamp older than a node can hold a reading`**
-   from **25 October 2026** onward. That is `kClockBase` + 30 days
-   (`checks.MAX_HOLD_S`). After that date a USB node with no time source cannot
-   deliver a single record. See the report accompanying this file; it is not
-   fixed here.
+1. **The first records show "relative to power-up, not wall clock"** on the
+   dashboard. Expected, not a fault: they were taken before the bridge's first
+   `A <seq> <time>` reached the node (see *The node's clock* below). Every
+   record after that is wall-clock time. If *every* record is flagged, the
+   bridge is older than the time field (`A <seq>` with no time): update
+   `backend/bridge_serial.py`.
+2. **`inconsistent: this device's clock has already been set`**: a board whose
+   flash was wiped (or a second board with the same id) sent a flagged record to
+   a database that has seen this device's wall-clock records. Clean the
+   database, as for failure 3.
 3. **`enrolment refused (409)`** then `bad signature` on everything: the database
    already holds device 26232001 with another key (a demo capture, or an earlier
    flash whose NVS key was erased). Clean the database. Nothing prints at all:
    wrong USB socket (use **UART**), or the monitor still holds the port.
+
+### The node's clock (P1, 1 Oct 2026)
+
+Until 1 Oct 2026 the node's clock was a hand-typed date (`kClockBase`, 25 Sep
+2026) plus uptime, and nothing ever set it. Every record from a board that had
+not been re-flashed was refused from 25 Oct 2026 (check 5, 30 days), and any
+reset sent time backwards. What happens now, and why:
+
+- **Where it starts.** `kClockBase` is the build time (`__DATE__`/`__TIME__`,
+  minus 14 h because those are the build machine's local time with no zone),
+  or `-DAC_CLOCK_BASE=<unix>`. Never ahead of true UTC, at most 26 h behind.
+- **Where the time comes from.** The server's clock rides on the answer the
+  node already asks for on every resync: `/api/lastack` returns `now`; the
+  serial bridge answers `Q <dev>` with `A <seq> <now>` (a board that predates
+  the field reads `<seq>` and ignores the rest); the gateway puts it in its
+  `FRAME_LASTACK` answer (the server's time, or its own once NTP has synced).
+  The node sets its clock from it every time it arrives, not only the first.
+- **Before that, the flag.** Records taken before the first answer carry
+  `FLAG_TIMEUNSET` (bit 7): their timestamp is uptime from `kClockBase`. The
+  server accepts them without the 30-day age rule and the dashboard and buyer's
+  page say *timestamp is relative to power-up, not wall clock*. Once the node
+  has stamped one record with a set clock, it never flags again; once the
+  server has accepted one unflagged record from a device, it refuses a flagged
+  one from it as inconsistent, and remembers that across restarts
+  (`devices.clock_set`).
+- **A reboot never goes backwards.** At boot the node reads the newest record
+  in its flash and resumes its clock from that record's timestamp, and no
+  record is ever stamped earlier than the one before it (a server time slightly
+  behind a fast crystal holds the clock still rather than stepping back).
+  **Persistence interval: every record, at zero extra cost.** The timestamp is
+  already written to flash in each record before the record can leave the node,
+  in the same LittleFS write, and LittleFS commits a file write atomically. So
+  the persisted value is exactly the last issued timestamp (margin 0: nothing
+  that left the node can be later than the newest record in flash), and there
+  is no second copy to wear flash or disagree. A separate NVS key would be a
+  second write per sample (about 105,000 a year at 5 minutes, which NVS's wear
+  levelling could take) to store a value the log already holds; it was not
+  added.
+- **A reboot after the clock was set, before the server is reached again**:
+  the records are not flagged (the node has already claimed wall-clock time,
+  and flagging again is what the server's consistency rule forbids), and their
+  timestamps are a lower bound: late by however long the board was without
+  power. The first record after power-up carries `FLAG_SELFTEST`, which marks
+  where that starts; the next server answer corrects the clock, forward only.
+- **Monotonic across the switch.** The server compares flagged timestamps with
+  each other and wall-clock timestamps with each other. The first wall-clock
+  record is not compared with the flagged ones before it: they are two
+  different clocks, and the node takes the server's time as it finds it.
+- **Not authenticated.** The time is not signed. Whatever carries it (the
+  bridge, the gateway, the network) can shift it, bounded by the node never
+  stepping backwards and by check 5 (60 s ahead, 30 days behind). A signed time
+  from the server is future work (docs/CRYPTO.md).
+- **Uptime** is read from `esp_timer` (64-bit), not `millis()`, which is 32-bit
+  and wraps after 49.7 days of uptime.
+
+UNPROVEN on a board, like the rest of this file: the simulated gate
+(`backend/tests/test_clock_gate.py`, a board flashed today run for 36 days with
+a reboot at 32.5) passes; step 1 above is where it is checked for real.
 
 ---
 
@@ -359,7 +415,7 @@ python -c "import json,urllib.request as u;B='http://127.0.0.1:8000';p=lambda pa
 bridging COM<gateway> <-> http://127.0.0.1:8000
 
 # AnnaChain gateway AA000001
-# uplink: USB serial  ·  clock: compiled-in date (not synced)
+# uplink: USB serial  ·  clock: build time + uptime (not synced)
 # LoRa: SX1262 up (UNPROVEN driver)
 # buffer 4000 frames · holding 0 · dropped 0 records, 0 gap notices
 # gap notices: heard 0 · forwarded 0
@@ -439,9 +495,10 @@ running and enrolled):
 **Passes when** the banner says `clock: NTP` and the dashboard shows the node's
 records arriving with no USB cable on the gateway's data port.
 
-This syncs the **gateway's** clock only. Records are stamped by the **node**,
-whose clock is still `kClockBase` plus uptime (step 1, failure 1 and 2); NTP on
-the gateway does not change a single record's timestamp.
+Records are stamped by the **node**. The gateway passes the time down in its
+answer to each node's query: the server's time when the server gave one, else
+its own NTP time (step 1, *The node's clock*). A node records the time it was
+given; it never stamps a record earlier than the one before.
 
 **How it goes wrong**
 
@@ -453,6 +510,6 @@ the gateway does not change a single record's timestamp.
    `--host 0.0.0.0`), Windows Firewall blocking inbound port 8000 on a Public
    network profile, or `AC_SERVER_URL` pointing at 127.0.0.1 (that is the
    gateway itself).
-3. **`clock: compiled-in date (not synced)`**, with `# NTP did not answer`. The
+3. **`clock: build time + uptime (not synced)`**, with `# NTP did not answer`. The
    network blocks UDP 123 (common on venue and campus Wi-Fi). The gateway retries
    every 30 s; a phone hotspot usually allows it.

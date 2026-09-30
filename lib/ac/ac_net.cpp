@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <time.h>
+#include <esp_timer.h>
 
 namespace ac {
 
@@ -23,7 +24,7 @@ bool NtpClock::sync(uint32_t timeoutMs) {
   configTime(0, 0, "pool.ntp.org", "time.google.com");   // UTC; records are UTC
   uint32_t t0 = millis();
   while (millis() - t0 < timeoutMs) {
-    // Anything earlier than the compiled-in date is the clock's power-on
+    // Anything earlier than the build time (kClockBase) is the clock's power-on
     // value, not an answer.
     if ((uint32_t)time(nullptr) >= kClockBase) { synced_ = true; return true; }
     delay(100);
@@ -33,7 +34,8 @@ bool NtpClock::sync(uint32_t timeoutMs) {
 
 uint32_t NtpClock::now() {
   if (synced_) return (uint32_t)time(nullptr);   // SNTP keeps adjusting it
-  return base_ + (uint32_t)(millis() / 1000);
+  // esp_timer, not millis(): millis() wraps after 49.7 days (ac_esp.h).
+  return base_ + (uint32_t)(esp_timer_get_time() / 1000000LL);
 }
 
 // ── WifiHttpLink ───────────────────────────────────────────────────────────
@@ -52,6 +54,7 @@ bool WifiHttpLink::up() {
 }
 
 bool WifiHttpLink::queryLastAck(uint32_t device, uint32_t& lastAck) {
+  time_ = 0;
   if (!up()) return false;
   HTTPClient http;
   http.setTimeout(5000);
@@ -59,10 +62,13 @@ bool WifiHttpLink::queryLastAck(uint32_t device, uint32_t& lastAck) {
   status_ = http.GET();
   if (status_ == 404) { http.end(); lastAck = 0; return true; }   // not enrolled yet
   if (status_ != 200) { http.end(); return false; }
-  long v = jsonNumber(http.getString(), "last_ack");
+  String body = http.getString();
   http.end();
+  long v = jsonNumber(body, "last_ack");
   if (v < 0) return false;
   lastAck = (uint32_t)v;
+  long t = jsonNumber(body, "now");       // absent from an older server: no time
+  time_ = t > 0 ? (uint32_t)t : 0;
   return true;
 }
 

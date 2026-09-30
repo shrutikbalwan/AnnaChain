@@ -64,6 +64,15 @@ class Node {
   uint32_t acked_    = 0;
   uint32_t batch_    = 20;
   bool     first_    = true;
+  // Time (docs/HIL.md step 1; checks.py check 5).
+  //   lastTs_   the timestamp of the newest record in flash. No record is ever
+  //             stamped earlier, so a reboot, or a server time a little behind
+  //             this clock, cannot make time run backwards.
+  //   clockSet_ the node has had wall-clock time since it last powered up, or
+  //             the newest record in flash says it had. Records stamped while
+  //             it is false carry FLAG_TIMEUNSET; once true it never goes back.
+  uint32_t lastTs_   = 0;
+  bool     clockSet_ = false;
   Stats    s_;
 };
 

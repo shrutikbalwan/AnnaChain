@@ -12,6 +12,16 @@ bool Node::begin() {
 
   // Pick up where the last power cycle left off, so a reset does not restart
   // the sequence and does not break the chain.
+  //
+  // The newest record is also where the clock resumes. Its timestamp is the
+  // last one this node issued: a record is stamped, signed and written to
+  // flash before anything else happens to it, so nothing that left the node
+  // can be later than the newest record in flash, and no separate copy of the
+  // time is needed (docs/HIL.md step 1 has the reasoning, and why not NVS).
+  // Its flag says whether the clock had been set: if it had, this node has
+  // already claimed wall-clock time, and it does not go back to flagging.
+  lastTs_ = 0;
+  clockSet_ = clk_.isSet();
   uint32_t last = st_.lastSeq();
   if (last) {
     uint8_t raw[kRecBytes];
@@ -20,6 +30,9 @@ bool Node::begin() {
       digest(r, prev_);
       nextSeq_ = last + 1;
       first_ = false;
+      lastTs_ = r.ts;
+      if (!(r.flags & FLAG_TIMEUNSET)) clockSet_ = true;
+      clk_.atLeast(lastTs_);          // uptime restarts at zero; the clock does not
     }
   }
   acked_ = st_.loadAck();
@@ -37,7 +50,11 @@ void Node::tick() {
   Record r;
   r.device = dev_;
   r.seq    = nextSeq_;
+  // Never earlier than the last record: a clock re-set to a server time a
+  // little behind this one holds still until true time catches up, rather
+  // than stamping a record the server would refuse as going backwards.
   r.ts     = clk_.now();
+  if (r.ts < lastTs_) r.ts = lastTs_;
   r.temp   = v.temp;
   r.rh     = v.rh;
   r.c2h4   = v.c2h4;
@@ -48,7 +65,8 @@ void Node::tick() {
                        (v.temp < 0 ? FLAG_COLD      : 0) |
                        (first_     ? FLAG_SELFTEST  : 0) |
                        (!v.ok      ? FLAG_SENSORBAD : 0) |
-                       (v.simulated ? FLAG_SIMULATED : 0));
+                       (v.simulated ? FLAG_SIMULATED : 0) |
+                       (!clockSet_  ? FLAG_TIMEUNSET : 0));
   // A reading the sensor refused to give is still recorded, but it is marked.
   // Without this the server cannot tell a dead SHT40 from a genuine 0.00 C.
   memcpy(r.prev, prev_, 32);
@@ -67,6 +85,7 @@ void Node::tick() {
   memcpy(prev_, d, 32);
   nextSeq_++;
   first_ = false;
+  lastTs_ = r.ts;
 
   // If the ring wrapped past something the server never got, say so out loud
   // rather than quietly losing it.
@@ -87,6 +106,14 @@ void Node::resync() {
   if (link_.queryLastAck(dev_, serverAck)) {
     acked_ = serverAck;
     st_.saveAck(acked_);
+    // The answer may carry the server's time. Take it every time it comes,
+    // not only the first: that is what keeps a drifting crystal honest. The
+    // next record is stamped from it and is no longer flagged.
+    uint32_t t = 0;
+    if (link_.serverTime(t)) {
+      clk_.set(t);
+      clockSet_ = true;
+    }
   }
 
   uint32_t last = st_.lastSeq();

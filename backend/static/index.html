@@ -146,6 +146,7 @@
       <div class="card">
         <h2>Temperature &amp; humidity — by the time the reading was taken</h2>
         <canvas id="chartT"></canvas>
+        <p class="note" id="tu-note" hidden></p>
         <p class="legend">
           <span class="swatch" style="background:#1f6fb5"></span>arrived live
           <span class="swatch" style="background:#c0500f"></span>held on the device, delivered late
@@ -383,6 +384,7 @@ function draw(s){
     chartE.data.datasets[0].data = s.series.map(p => p.e);
     chartE.update('none');
     eNote(s.series, 'No ethylene sensor fitted on this node. The field is transmitted as “not fitted” rather than as a zero.');
+    tuNote(s.series);
   }
 
   // alerts
@@ -693,6 +695,19 @@ function drawPlain(s, lo, hi){
   line($('chartT'), s.series.map(p => ({v:p.t, late:p.lag > 0})), lo, hi, '\u00b0C', true);
   line($('chartE'), s.series.map(p => ({v:p.e})), null, null, 'ppb', false);
   eNote(s.series, 'No ethylene sensor fitted on this node.');
+  tuNote(s.series);
+}
+
+// Readings the device flagged FLAG_TIMEUNSET (bit 7): taken before any server
+// told it the time. The flag is inside the signature, so this is the device
+// saying so.
+function tuNote(series){
+  const el = $('tu-note');
+  const n = series.filter(p => p.tu).length;
+  el.hidden = !n;
+  if (n) el.textContent = n + ' of ' + series.length + ' readings were taken before this' +
+    ' node was first told the time: their timestamp is relative to power-up, not wall clock,' +
+    ' and the chart places them by it.';
 }
 
 // The note under the ethylene chart. Readings the device itself flagged as

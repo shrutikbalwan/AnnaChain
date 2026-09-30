@@ -44,6 +44,16 @@
 //     that has overrun would then ask for records it has nowhere to put, every
 //     sample, for the whole outage.
 //
+// ── Time ───────────────────────────────────────────────────────────────────
+// Nodes stamp their own records, so a node needs the time from somewhere, and
+// the gateway is the only thing it can hear. The answer to a FRAME_QUERY
+// therefore also carries a time: the server's, as the uplink reported it with
+// the last-ACK, or else the gateway's own clock if NTP has set it. Only with an
+// answer (known = true): a gateway with no uplink says nothing about anything.
+// The gateway cannot sign time any more than it can sign records; what it can
+// do with it is bounded by the node (it never steps its clock backwards) and by
+// the server's check 5 (docs/CRYPTO.md).
+//
 // A record is a duplicate if it is in the buffer now, or at or below the last
 // last-ACK the server gave for its node. Not "at or below the highest sequence
 // heard": after an overrun that rule would throw away exactly the records the
@@ -99,7 +109,8 @@ struct IGatewayRadio {
   // still reconciles against the server's own last-ACK.
   virtual bool ack(uint32_t device, uint32_t seq) = 0;
   // Answer a node's FRAME_QUERY. known = false means "no value" (see above).
-  virtual bool lastAck(uint32_t device, bool known, uint32_t seq) = 0;
+  // unixNow is the time to give the node (0 = none): see "time" above.
+  virtual bool lastAck(uint32_t device, bool known, uint32_t seq, uint32_t unixNow) = 0;
 };
 
 struct GwStats {
@@ -140,7 +151,8 @@ class Gateway {
 
   // What to tell a node that asks what the server holds (see the top of this
   // file). False means no value: the uplink is down or the server did not say.
-  bool answerLastAck(uint32_t device, uint32_t& value);
+  // unixNow, if given, is the time to pass down with the answer (0 = none).
+  bool answerLastAck(uint32_t device, uint32_t& value, uint32_t* unixNow = nullptr);
 
  private:
   struct NodeSlot { uint32_t dev; bool known; uint32_t ack; };

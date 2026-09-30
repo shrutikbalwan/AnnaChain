@@ -22,6 +22,8 @@ Protocol (plain text, one line each):
     #  ...                       human-readable chatter, ignored
 Replies:
     A <seq>                      accepted up to this sequence
+    A <seq> <unix>               the answer to Q, with this laptop's clock: how
+                                 the node learns the time (src/main.cpp)
     N <reason>                   refused
 """
 import argparse, hashlib, hmac, json, struct, sys, time
@@ -166,7 +168,7 @@ def run_serial(port, baud, srv):
             srv.register(int(dev), key)
         elif line.startswith("Q "):
             dev = int(line.split()[1])
-            ser.write(f"A {srv.ack.get(dev, 0)}\n".encode())
+            ser.write(f"A {srv.ack.get(dev, 0)} {int(time.time())}\n".encode())
         elif line.startswith("G "):
             _, dev, lo, hi, mac = line.split()
             if srv.gap_ok(int(dev), int(lo), int(hi), mac):

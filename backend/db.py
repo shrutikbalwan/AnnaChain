@@ -31,7 +31,9 @@ CREATE TABLE IF NOT EXISTS devices (
   cal_date    REAL,         -- when this sensor was last calibrated
   cal_months  INTEGER NOT NULL DEFAULT 12,   -- EN 13486 verification interval
   cal_ref     TEXT,         -- who did it, and against what
-  last_ts     INTEGER       -- time of the last accepted record, for check 5
+  last_ts     INTEGER,      -- time of the last accepted record, for check 5
+  clock_set   INTEGER NOT NULL DEFAULT 0  -- a record without FLAG_TIMEUNSET was
+                            -- accepted: a flagged one from now on is refused
 );
 
 -- Every key a device has had, and the first sequence number it signs. A key is
@@ -228,9 +230,14 @@ def _migrate(c):
                       ("cal_date", "REAL"),
                       ("cal_months", "INTEGER NOT NULL DEFAULT 12"),
                       ("cal_ref", "TEXT"),
-                      ("last_ts", "INTEGER")):
+                      ("last_ts", "INTEGER"),
+                      ("clock_set", "INTEGER NOT NULL DEFAULT 0")):
         if col not in have:
             c.execute(f"ALTER TABLE devices ADD COLUMN {col} {decl}")
+            if col == "clock_set":
+                # Before FLAG_TIMEUNSET existed every accepted record claimed
+                # wall-clock time, so a device with one has a set clock.
+                c.execute("UPDATE devices SET clock_set=1 WHERE last_ts IS NOT NULL")
 
     # Older databases threw the evidence away. The column is added, but rows
     # stored before it existed have no raw bytes and cannot be verified; verify()
@@ -362,12 +369,14 @@ def devices():
 
 
 def set_tip(device_id: int, last_ack: int, tip_digest: str, anchor_next: int = 0,
-            last_ts: int = None):
+            last_ts: int = None, clock_set: bool = False):
+    # clock_set only ever goes from 0 to 1: MAX() keeps a set clock set.
     c = conn()
     c.execute(
         "UPDATE devices SET last_ack=?, tip_digest=?, anchor_next=?, last_seen=?, "
-        "last_ts=COALESCE(?, last_ts) WHERE device_id=?",
-        (last_ack, tip_digest, anchor_next, time.time(), last_ts, device_id),
+        "last_ts=COALESCE(?, last_ts), clock_set=MAX(clock_set, ?) WHERE device_id=?",
+        (last_ack, tip_digest, anchor_next, time.time(), last_ts, int(bool(clock_set)),
+         device_id),
     )
     c.commit()
 

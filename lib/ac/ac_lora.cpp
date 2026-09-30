@@ -135,9 +135,9 @@ bool LoraRadio::ack(uint32_t device, uint32_t seq) {
   return t_.transmit(FRAME_ACK, p, sizeof(p));
 }
 
-bool LoraRadio::lastAck(uint32_t device, bool known, uint32_t seq) {
-  uint8_t p[9];
-  put32(p, device); p[4] = known ? 1 : 0; put32(p + 5, seq);
+bool LoraRadio::lastAck(uint32_t device, bool known, uint32_t seq, uint32_t unixNow) {
+  uint8_t p[13];
+  put32(p, device); p[4] = known ? 1 : 0; put32(p + 5, seq); put32(p + 9, unixNow);
   return t_.transmit(FRAME_LASTACK, p, sizeof(p));
 }
 
@@ -162,6 +162,7 @@ bool LoraNodeLink::queryLastAck(uint32_t device, uint32_t& lastAck) {
   // uplink, or the server did not answer) and no answer at all both return
   // false: the node keeps what it last knew. Never ack_, which only says the
   // gateway once had it, and never 0, which would resend the whole flash.
+  time_ = 0;
   if (!up()) return false;
   uint8_t q[4];
   put32(q, device);
@@ -171,9 +172,10 @@ bool LoraNodeLink::queryLastAck(uint32_t device, uint32_t& lastAck) {
     while (millis() - t0 < timeout_) {
       uint8_t k; uint8_t p[16]; int16_t rssi;
       int n = t_.poll(k, p, sizeof(p), rssi);
-      if (n == 9 && k == FRAME_LASTACK && get32(p) == device) {
+      if ((n == 9 || n == 13) && k == FRAME_LASTACK && get32(p) == device) {
         if (!p[4]) return false;                 // the gateway has no value
         lastAck = get32(p + 5);
+        time_ = n == 13 ? get32(p + 9) : 0;      // 0: the gateway knows no time
         return true;
       }
       delay(2);
@@ -214,7 +216,7 @@ int  Sx1262Transport::poll(uint8_t&, uint8_t*, size_t, int16_t&) { return -1; }
 bool Sx1262Transport::versionString(char out[17]) { out[0] = 0; return false; }
 bool LoraRadio::receive(uint8_t*, uint8_t&, int16_t&) { return false; }
 bool LoraRadio::ack(uint32_t, uint32_t) { return false; }
-bool LoraRadio::lastAck(uint32_t, bool, uint32_t) { return false; }
+bool LoraRadio::lastAck(uint32_t, bool, uint32_t, uint32_t) { return false; }
 bool LoraNodeLink::queryLastAck(uint32_t, uint32_t&) { return false; }
 bool LoraNodeLink::send(const uint8_t*, size_t, uint32_t&) { return false; }
 bool LoraNodeLink::declareGap(uint32_t, uint32_t, uint32_t, const uint8_t*) { return false; }
