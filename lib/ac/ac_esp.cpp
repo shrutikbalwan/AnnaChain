@@ -2,6 +2,7 @@
 #include "ac_esp.h"
 #include "ac_sha256.h"
 #include "ac_batt.h"
+#include "ac_pins.h"
 #include <Preferences.h>
 #include <Wire.h>
 
@@ -141,7 +142,8 @@ Reading Sht40Sensors::read() {
   v.ok = false;
 #endif
   v.c2h4 = kEthyleneNotFitted;              // no ethylene sensor chosen yet — say so
-  if (tamperPin_ >= 0) v.tamper = (digitalRead(tamperPin_) == HIGH);
+  // HIGH = open loop = tamper, fail-closed (ac_pins.h: why not inverted).
+  if (tamperPin_ >= 0) v.tamper = pins::tamperFromLevel(digitalRead(tamperPin_) == HIGH);
   if (battPin_ >= 0) {
     uint32_t mv = analogReadMilliVolts(battPin_) * 2;     // 2:1 divider
     v.batt = batteryPercent(mv);                          // ac_batt.h, tested in selftest

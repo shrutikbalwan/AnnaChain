@@ -155,6 +155,17 @@ registered 26232101, server has 0
 (The `K 639836417 <64 hex>` line the node prints is consumed by the bridge, not
 echoed: it is what produces `registered 26232101`.)
 
+**The tamper jumper, from step 2 on.** Fit a jumper wire from **GPIO4 to GND**
+(header J1 pin 4 to any GND pin) before flashing `node` or `node_lora`. GPIO4 is
+the tamper reed loop with its internal pull-up on: a shut lid pulls it LOW
+(sealed); HIGH means the loop is open, and every record carries `FLAG_TAMPER`
+and raises a *tamper* alert. A bare board has an open loop, so without the
+jumper it reports a broken seal on every reading, which is correct: nothing is
+holding it shut. The sense is not inverted to make the bench quiet, because an
+inverted loop reads a cut or unplugged wire as sealed (fail-open), which
+defeats the sensor (`lib/ac/ac_pins.h`). `node_mock` (this step) does not read
+the pin, so it needs no jumper. Take the jumper off to demonstrate tamper.
+
 **Passes when** the dashboard shows device `26232101` with a line near 4 °C
 growing by one point every 5 s, status **live**. Then press BOOT: the node prints
 `# LINK DOWN — still logging`, the dashboard goes **silent**; press it again and
@@ -288,12 +299,13 @@ dashboard line follows. Ice water in a sealed bag does the same thing downwards.
 2. **`Enclosure opened in transit` (tamper) alert on the first record.** The
    tamper input is GPIO4 with the internal pull-up, and it reads *open* unless the
    reed loop pulls it to GND. On a bench with no reed switch, tie GPIO4 to GND
-   with a jumper, or every record carries `FLAG_TAMPER`.
-3. **Battery shows 100 % no matter what.** With no divider on GPIO5, or a cell
-   below 3.3 V, the percentage in `Sht40Sensors::read()` is computed in unsigned
-   arithmetic and wraps round to a large number, which is then clamped to 100.
-   A flat cell reads full. See the report accompanying this file; it is not
-   fixed here.
+   with a jumper, or every record carries `FLAG_TAMPER` (step 1, *The tamper
+   jumper*, says why the sense is not inverted instead).
+3. **Battery shows 0 %** with no divider on GPIO5: nothing is on the ADC, and
+   0 % (with a *battery* alert) is the honest reading. Fit the 2:1 divider.
+   Until 1 Oct 2026 this read 100 %: the conversion was unsigned and a cell
+   below 3.3 V wrapped round to full. It is now `batteryPercent()` in
+   `lib/ac/ac_batt.h`, tested in selftest (3.0 V reads 0 %, 3.75 V 50 %).
 
 ---
 

@@ -9,6 +9,7 @@
 #include "ac_gateway.h"
 #include "ac_sim.h"
 #include "ac_batt.h"
+#include "ac_pins.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -490,6 +491,19 @@ static void test_battery_percent() {
         "the low-battery alert (below 20 %) starts under 3.48 V");
 }
 
+// ── 9f. the tamper loop fails closed ─────────────────────────────────────
+// GPIO4 has its pull-up on and the reed loop pulls it to GND when the lid is
+// shut. "Enable the pull-up and invert" was proposed so that a bare bench board
+// would stop reporting tamper; it would also make a cut or unplugged loop read
+// as sealed. The bench gets a jumper instead (docs/HIL.md step 1).
+static void test_tamper_fails_closed() {
+  head("The tamper loop fails closed");
+  CHECK(pins::tamperFromLevel(true),
+        "HIGH (lid open, loop cut, connector pulled, nothing fitted) is tamper");
+  CHECK(!pins::tamperFromLevel(false), "LOW (the loop, or the bench jumper, to GND) is sealed");
+  CHECK(pins::kTamper == 4, "on GPIO4, where HIL.md step 1 puts the jumper");
+}
+
 // ── 10. a sensor that stops answering ─────────────────────────────────────
 static void test_sensor_fault() {
   head("The sensor stops answering");
@@ -913,6 +927,7 @@ int main() {
   test_clock_set_by_server();
   test_clock_via_gateway();
   test_battery_percent();
+  test_tamper_fails_closed();
   test_sensor_fault();
   test_gateway_basic();
   test_gateway_buffers_when_uplink_dies();
