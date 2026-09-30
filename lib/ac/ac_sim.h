@@ -91,13 +91,13 @@ class SimServer {
 
   bool accept(const uint8_t* recs, size_t count, ISigner& signer);
   // Records a hole the device reported, and re-anchors the chain after it.
-  void noteGap(uint32_t device, uint32_t from, uint32_t to);
+  void noteGap(uint32_t device, uint32_t from, uint32_t to, const uint8_t mac[32]);
   uint32_t lastAck(uint32_t device) const {
     auto it = ack_.find(device);
     return it == ack_.end() ? 0 : it->second;
   }
   size_t held() const { return db_.size(); }
-  struct Gap { uint32_t device, from, to; };
+  struct Gap { uint32_t device, from, to; uint8_t mac[32]; };
   const std::vector<Gap>& gaps() const { return gaps_; }
   const std::vector<Record>& records() const { return db_; }
   uint32_t rejected() const { return rejected_; }
@@ -140,14 +140,14 @@ class SimLink : public ILink {
 class SimRadio : public IGatewayRadio {
  public:
   bool begin() override { return true; }
-  bool receive(uint8_t rec[kRecBytes], int16_t& rssi) override;
+  bool receive(uint8_t frame[kRecBytes], uint8_t& kind, int16_t& rssi) override;
   bool ack(uint32_t device, uint32_t seq) override {
     acks_.push_back({device, seq});
     return true;
   }
 
   // called by the node side
-  void transmit(const uint8_t rec[kRecBytes]);
+  void transmit(const uint8_t frame[kRecBytes], uint8_t kind = FRAME_RECORD);
   void setLossPercent(int pct) { loss_ = pct; }
   void setRssi(int16_t r) { rssi_ = r; }
   size_t queued() const { return q_.size(); }
@@ -157,7 +157,7 @@ class SimRadio : public IGatewayRadio {
   const std::vector<Ack>& acks() const { return acks_; }
 
  private:
-  std::vector<std::vector<uint8_t>> q_;
+  std::vector<std::vector<uint8_t>> q_;     // kind byte, then the frame
   std::vector<Ack> acks_;
   int loss_ = 0;
   uint32_t lost_ = 0, rnd_ = 99;
@@ -176,11 +176,10 @@ class SimNodeToGateway : public ILink {
     return true;
   }
   bool send(const uint8_t* recs, size_t count, uint32_t& acked) override;
-  // The gateway does not forward gap notices yet; see backend/README.md.
-  bool declareGap(uint32_t, uint32_t, uint32_t to, const uint8_t*) override {
-    if (!up_) return false;
-    ack_ = to; return true;
-  }
+  // The signed notice goes over LoRa like a record, and the gateway carries
+  // it upstream in its place in the queue.
+  bool declareGap(uint32_t device, uint32_t from, uint32_t to,
+                  const uint8_t mac[32]) override;
   void setUp(bool u) { up_ = u; }
  private:
   SimRadio& radio_;

@@ -1,8 +1,15 @@
 // AnnaChain — produce a capture file the Python server can replay.
 //
 //   g++ -std=gnu++17 -Ilib/ac lib/ac/*.cpp tools/dump.cpp -o dump
-//   ./dump [online] [dark] [--ethylene] [--start <unix>] > demo.capture
+//   ./dump [online] [dark] [--gateway] [--ethylene] [--start <unix>] > demo.capture
 //   python3 backend/feed_sim.py demo.capture
+//
+// --gateway puts the truck gateway in the path, as on real hardware: node ->
+// LoRa -> gateway -> uplink. The crate drops out of LoRa range for [dark]
+// readings, long enough for its 4096-record flash to overrun, and comes back
+// while the cab still has no signal. The node's signed gap notice then waits in
+// the gateway's buffer with the backlog, and goes up in its place in the queue
+// when the uplink returns. What this prints is what the gateway sent upstream.
 //
 // --ethylene simulates an ethylene sensor. The board does not have one, so it
 // is off by default and the capture says "not fitted", exactly as the board
@@ -12,6 +19,7 @@
 // C++ and the Python agree byte for byte about what a record is — a mismatch
 // there is a whole evening lost on the bench.
 #include "ac_node.h"
+#include "ac_gateway.h"
 #include "ac_sim.h"
 #include <cstdio>
 #include <cstring>
@@ -64,17 +72,75 @@ static uint32_t tripStart(long explicitStart, int readings) {
   return start - start % 300u;          // align to the 5-minute sampling grid
 }
 
+static void printKey() {
+  std::printf("K %u ", 0x26232001u);
+  for (const char* p = kKey; *p; ++p) std::printf("%02x", (unsigned char)*p);
+  std::printf("\n");
+}
+
+// The real data path: the node never talks to the server, only to the gateway.
+static int viaGateway(int online1, int dark, bool ethylene, long start) {
+  const int hold = 12;                 // readings the cab stays dark after the crate is back
+  SimClock   clk(tripStart(start, online1 + dark + hold));
+  SimSensors sns(7);
+  sns.setEthyleneFitted(ethylene);
+  MemStore   store(4096);
+  SoftSigner signer(kKey);
+  SimRadio   radio;
+  GwBuffer   gbuf(8192);
+  DumpLink   up;                       // the gateway's uplink: this is what gets printed
+  Gateway    gw(0xAA000001, clk, radio, gbuf, up);
+  SimNodeToGateway lora(radio);
+  Node node(0x26232001, clk, sns, store, lora, signer);
+  gw.begin(); gw.setBatchSize(20);
+  node.setBatchSize(20); node.begin();
+  printKey();
+
+  for (int i = 0; i < online1; ++i) {
+    if (i == online1 * 55 / 100) sns.openDoor(35);
+    node.tick(); gw.poll(); gw.forward();
+    clk.advance(300);
+  }
+
+  std::printf("# offline\n");
+  lora.setUp(false);                   // the crate is out of LoRa range...
+  up.setUp(false);                     // ...and the cab has no mobile signal
+  for (int i = 0; i < dark; ++i) { node.tick(); gw.poll(); clk.advance(300); }
+
+  lora.setUp(true);                    // back in range: gap notice, then the backlog
+  node.resync();
+  for (int i = 0; i < hold; ++i) { node.tick(); gw.poll(); clk.advance(300); }
+  std::fprintf(stderr, "gateway holding %u frames; gap notices heard: %u\n",
+               gw.buffered(), gw.stats().gapsReceived);
+
+  up.setUp(true);                      // signal at the cab
+  std::printf("# online\n");
+  gw.forward();
+  std::printf("# done\n");
+
+  const GwStats& g = gw.stats();
+  std::fprintf(stderr,
+      "via gateway: node stored %u, declared %u gap(s); gateway forwarded %u records "
+      "and %u gap notice(s), dropped %u records and %u notices\n",
+      node.stats().stored, node.stats().gapsDeclared, g.forwarded, g.gapsForwarded,
+      g.dropped, g.gapsDropped);
+  return (g.gapsDropped || g.dropped || gw.buffered()) ? 1 : 0;
+}
+
 int main(int argc, char** argv) {
   int online1 = 1000, dark = 350;
-  bool ethylene = false;
+  bool ethylene = false, gateway = false;
   long start = 0;
   int pos = 0;
   for (int i = 1; i < argc; ++i) {
     if (!strcmp(argv[i], "--ethylene")) ethylene = true;
+    else if (!strcmp(argv[i], "--gateway")) gateway = true;
     else if (!strcmp(argv[i], "--start") && i + 1 < argc) start = atol(argv[++i]);
     else if (pos == 0) { online1 = atoi(argv[i]); pos++; }
     else if (pos == 1) { dark    = atoi(argv[i]); pos++; }
   }
+
+  if (gateway) return viaGateway(online1, dark, ethylene, start);
 
   SimClock   clk(tripStart(start, online1 + dark));
   SimSensors sns(7);
@@ -86,9 +152,7 @@ int main(int argc, char** argv) {
   node.setBatchSize(20);
   node.begin();
 
-  std::printf("K %u ", 0x26232001u);
-  for (const char* p = kKey; *p; ++p) std::printf("%02x", (unsigned char)*p);
-  std::printf("\n");
+  printKey();
 
   // A real trip is not a flat line. Somewhere before the blind spot a door is
   // opened at a checkpoint, the load warms, ethylene starts climbing, and the

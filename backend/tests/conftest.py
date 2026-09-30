@@ -36,6 +36,7 @@ def client(tmp_path, monkeypatch):
               app_mod.silence_start, app_mod.recovering):
         d.clear()
     app_mod._diagnosed.clear()
+    app_mod.throttle.__init__()
     with TestClient(app_mod.app) as c:
         yield c
 

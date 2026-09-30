@@ -280,10 +280,19 @@ accurate.
   keep the device's raw bytes. The column is added on start-up, but old rows
   have nothing in it, and `verify` reports each one as `missing_raw` rather than
   passing it. There is nothing to backfill it from.
-- **The gateway does not forward gap notices yet.** A node talking to the
-  server directly (or through `bridge_serial.py`) can declare a hole; a node
-  behind the truck gateway cannot, because `SimNodeToGateway` does not carry
-  the notice upstream.
+- **Gap notices cross the truck gateway** (done). A node's signed notice goes
+  over LoRa as a gap frame, waits in the gateway's FIFO with the records, and is
+  handed upstream unchanged and in order; a notice lost to gateway overrun is
+  counted (`gapsDropped`). `backend/tests/test_gateway_gap_e2e.py` runs the
+  C++ node and gateway and checks what the buyer sees.
+- **Records the gateway itself drops are not declared.** When the *gateway's*
+  buffer overruns (the node was in LoRa range but the cab had no signal for
+  longer than the gateway can hold), the lost records are counted on the
+  gateway, but nothing signed tells the server. The node has already been
+  acknowledged hop-by-hop, so it does not resend, and the server waits for the
+  first missing sequence number. Closing this needs the node to reconcile
+  against the server's last-ACK through the gateway, which the LoRa path does
+  not do yet.
 - **Clock checks are bounds, not a time source.** A reading more than 60 s
   ahead of the server, more than 30 days old, or earlier than the reading
   before it is refused. A clock that is wrong by less than that (a few hours
@@ -294,13 +303,23 @@ accurate.
   curve, and the record format has no flag saying so, so the server cannot
   tell; the dashboard's note under the chart says where such values can only
   come from.
-- **No rate-limiting on failed logins.** PBKDF2 at 200k iterations slows a
-  guesser down, but nothing locks an account or an address out.
-- **Chart.js is not vendored.** Without the CDN the dashboard falls back to
-  drawing the charts itself (see "Demo on bad Wi-Fi").
+- **Failed logins back off** (done). After 5 failures in a row for a username,
+  or from one address, sign-in is refused for 30 s, doubling with each further
+  failure up to 15 minutes; the right password is refused too while the lock
+  lasts. The wait is in the `Retry-After` header and in `retry_after_s`, and the
+  sign-in form shows it. What it does not do: the counters live in memory, so a
+  restart clears them and several worker processes would each keep their own;
+  behind a reverse proxy every request comes from the proxy's address; and
+  anyone can lock the real operator out for up to 15 minutes by failing on
+  purpose, which is the usual price of a per-username lock.
+- **Chart.js is vendored** (done). `backend/static/chart.umd.min.js` is
+  Chart.js 4.4.1, checked against the SRI hash cdnjs publishes, with its MIT
+  licence beside it. The dashboard never needs the CDN; the hand-drawn
+  renderer stays as a second line of defence.
 - **The deck is not in the repository.** `docs/VERIFY.md` section 7 reads
-  `SIH2026_26232_AnnaChain_OfficialFormat.pptx`; copy it (and the PDF) into
-  `docs/` for that section to run.
+  `docs/SIH2026_26232_AnnaChain_OfficialFormat.pptx`, and no file of that name
+  exists yet. The only 26232 deck found (`SIH2026_26232_SecureHarvest_OfficialFormat.pptx`)
+  has 6 slides but still carries the old name on slides 1, 2 and 5.
 - **Calibration (check 7) is implemented but unpopulated.** Each device carries
   a calibration date and an EN 13486 interval; a lapsed sensor raises an alert
   and its readings are marked as uncertified. The readings are still stored —
@@ -350,7 +369,6 @@ not), `chain_break` (a reading is missing or out of place), `bad_gap_signature`
 
 ## Demo on bad Wi-Fi
 
-The dashboard tries a local copy of Chart.js first, then the CDN, and if neither
-is reachable it draws the lines itself. Nothing breaks. To be certain at the
-venue, save `chart.umd.min.js` from cdnjs into `backend/static/` beforehand and
-it will never touch the network.
+Chart.js is vendored in `backend/static/`, so the dashboard never touches the
+network for it. If that file were ever missing it would try the CDN, and if
+neither is reachable it draws the lines itself. Nothing breaks.

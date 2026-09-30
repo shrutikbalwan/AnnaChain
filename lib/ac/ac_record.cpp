@@ -69,4 +69,19 @@ void gapDigest(uint32_t device, uint32_t from, uint32_t to, uint8_t out[32]) {
   Sha256::hash((const uint8_t*)msg, (size_t)n, out);
 }
 
+void encodeGapFrame(uint32_t device, uint32_t from, uint32_t to,
+                    const uint8_t mac[32], uint8_t out[kRecBytes]) {
+  memset(out, 0, kRecBytes);
+  uint8_t* p = out;
+  put32(p, device); put32(p, from); put32(p, to);
+  memcpy(p, mac, 32);
+}
+
+void decodeGapFrame(const uint8_t in[kRecBytes], uint32_t& device, uint32_t& from,
+                    uint32_t& to, uint8_t mac[32]) {
+  const uint8_t* p = in;
+  device = get32(p); from = get32(p); to = get32(p);
+  memcpy(mac, p, 32);
+}
+
 }  // namespace ac

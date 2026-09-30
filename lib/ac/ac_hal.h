@@ -90,4 +90,23 @@ struct ISigner {
   virtual bool verify(const uint8_t digest[32], const uint8_t sig[32]) = 0;
 };
 
+// ── the secure element, for real: ECDSA P-256 ─────────────────────────────
+// An ECDSA signature is 64 bytes (r, s). The record format reserves 32 bytes
+// for its signature and ISigner above produces 32, so the ATECC608B cannot
+// simply replace SoftSigner. This interface exists so the chip's driver can be
+// written, compiled and exercised on arrival day without pretending otherwise.
+//
+// Nothing signs records with it yet. Moving records onto it is a planned,
+// separate change — a v2 record of 116 bytes, verified by the server and by
+// the buyer's browser against a published public key — written up in
+// docs/HIL.md, step 4.
+struct IEcdsaSigner {
+  virtual ~IEcdsaSigner() {}
+  virtual bool begin() = 0;
+  // The device's public key, X then Y, 32 bytes each.
+  virtual bool publicKey(uint8_t pub[64]) = 0;
+  // r then s, 32 bytes each, over a 32-byte digest the caller has computed.
+  virtual bool sign(const uint8_t digest[32], uint8_t sig[64]) = 0;
+};
+
 }  // namespace ac

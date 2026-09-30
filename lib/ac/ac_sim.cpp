@@ -140,8 +140,11 @@ bool SimServer::accept(const uint8_t* recs, size_t count, ISigner& signer) {
   return true;
 }
 
-void SimServer::noteGap(uint32_t device, uint32_t from, uint32_t to) {
-  gaps_.push_back({device, from, to});
+void SimServer::noteGap(uint32_t device, uint32_t from, uint32_t to,
+                        const uint8_t mac[32]) {
+  Gap g{device, from, to, {0}};
+  memcpy(g.mac, mac, 32);
+  gaps_.push_back(g);
   ack_[device] = to;             // the server will never see these; stop waiting
   tip_.erase(device);            // the chain restarts after the hole
   anchorNext_[device] = true;
@@ -178,22 +181,26 @@ bool SimLink::declareGap(uint32_t device, uint32_t from, uint32_t to,
   uint8_t d[32];
   gapDigest(device, from, to, d);
   if (!signer_.verify(d, mac)) return false;
-  srv_.noteGap(device, from, to);
+  srv_.noteGap(device, from, to, mac);
   return true;
 }
 
 // ── SimRadio ──────────────────────────────────────────────────────────────
-void SimRadio::transmit(const uint8_t rec[kRecBytes]) {
+void SimRadio::transmit(const uint8_t frame[kRecBytes], uint8_t kind) {
   if (loss_ > 0) {
     rnd_ = rnd_ * 1103515245u + 12345u;
     if ((int)((rnd_ >> 16) % 100) < loss_) { lost_++; return; }   // packet lost
   }
-  q_.push_back(std::vector<uint8_t>(rec, rec + kRecBytes));
+  std::vector<uint8_t> pkt(1 + kRecBytes);
+  pkt[0] = kind;
+  memcpy(pkt.data() + 1, frame, kRecBytes);
+  q_.push_back(pkt);
 }
 
-bool SimRadio::receive(uint8_t rec[kRecBytes], int16_t& rssi) {
+bool SimRadio::receive(uint8_t frame[kRecBytes], uint8_t& kind, int16_t& rssi) {
   if (q_.empty()) return false;
-  memcpy(rec, q_.front().data(), kRecBytes);
+  kind = q_.front()[0];
+  memcpy(frame, q_.front().data() + 1, kRecBytes);
   q_.erase(q_.begin());
   rssi = rssi_;
   return true;
@@ -213,6 +220,16 @@ bool SimNodeToGateway::send(const uint8_t* recs, size_t count, uint32_t& acked) 
   decode(recs + (count - 1) * kRecBytes, r);
   ack_ = r.seq;
   acked = ack_;
+  return true;
+}
+
+bool SimNodeToGateway::declareGap(uint32_t device, uint32_t from, uint32_t to,
+                                  const uint8_t mac[32]) {
+  if (!up_) return false;
+  uint8_t frame[kRecBytes];
+  encodeGapFrame(device, from, to, mac, frame);
+  radio_.transmit(frame, FRAME_GAP);
+  ack_ = to;                          // hop-by-hop, exactly as for records
   return true;
 }
 

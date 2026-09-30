@@ -67,4 +67,18 @@ void digest(const Record& r, uint8_t out[32]);
 // consignment and call it an outage.
 void gapDigest(uint32_t device, uint32_t from, uint32_t to, uint8_t out[32]);
 
+// What travels over LoRa. A frame is always kRecBytes long so the gateway can
+// buffer records and gap notices in one queue, in the order they must reach the
+// server. The kind travels beside the frame, never inside a record.
+enum FrameKind : uint8_t { FRAME_RECORD = 0, FRAME_GAP = 1 };
+
+// A gap notice as a frame, little-endian:
+//   device 4 | from 4 | to 4 | mac 32 | zero 40
+// mac is the device's signature over gapDigest(device, from, to). Anything that
+// carries this frame can read it, and nothing that carries it can change it.
+void encodeGapFrame(uint32_t device, uint32_t from, uint32_t to,
+                    const uint8_t mac[32], uint8_t out[kRecBytes]);
+void decodeGapFrame(const uint8_t in[kRecBytes], uint32_t& device, uint32_t& from,
+                    uint32_t& to, uint8_t mac[32]);
+
 }  // namespace ac

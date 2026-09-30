@@ -426,6 +426,104 @@ static void test_gateway_overrun() {
   CHECK(mem.count() == 100, "but the node still has all 100 in its own flash");
 }
 
+// ── 12. a declared gap reaches the server through the gateway ────────────
+// On the truck the path is node -> LoRa -> gateway -> server. A gap notice that
+// only works when the node talks to the server directly would pass here and
+// fail in the field.
+struct GapRig {
+  SimClock   clk{1758758400u};
+  SimRadio   radio;
+  GwBuffer   gbuf;
+  SoftSigner signer{"gateway-gap-test-device-key"};
+  SimServer  srv;
+  SimLink    uplink{srv, signer};
+  Gateway    gw{0xAA0002, clk, radio, gbuf, uplink};
+  SimSensors sns{9};
+  MemStore   mem{100};                     // a tiny flash, so it overruns
+  SimNodeToGateway link{radio};
+  Node       node{0x2001, clk, sns, mem, link, signer};
+
+  explicit GapRig(uint32_t gwCap = 2000) : gbuf(gwCap) {
+    gw.begin(); gw.setBatchSize(20); node.setBatchSize(20); node.begin();
+  }
+  // The crate is out of LoRa range for n readings: the node logs, the gateway
+  // hears nothing.
+  void outOfRange(int n) {
+    link.setUp(false);
+    for (int i = 0; i < n; ++i) { node.tick(); gw.poll(); clk.advance(300); }
+    link.setUp(true);
+  }
+  void expectedMac(uint32_t from, uint32_t to, uint8_t mac[32]) {
+    uint8_t d[32]; gapDigest(0x2001, from, to, d); signer.sign(d, mac);
+  }
+};
+
+static void test_gateway_relays_gap() {
+  head("A declared gap crosses the gateway");
+  GapRig r;
+  r.uplink.setUp(false);                   // and no mobile signal at the cab either
+  r.outOfRange(150);                       // flash holds 100: records 1-50 are gone
+  r.node.resync();                         // back in range: gap notice, then 51-150
+  r.gw.poll();
+
+  CHECK(r.gw.stats().gapsReceived == 1, "the gateway heard the node's gap notice");
+  uint8_t frame[kRecBytes], want[kRecBytes], mac[32];
+  uint8_t kind = 0xFF;
+  r.expectedMac(1, 50, mac);
+  encodeGapFrame(0x2001, 1, 50, mac, want);
+  CHECK(r.gbuf.peekAt(0, frame, kind) && kind == FRAME_GAP && !memcmp(frame, want, kRecBytes),
+        "it is buffered first, byte for byte as the node signed it");
+  CHECK(r.gw.buffered() == 101, "ahead of the 100 records that survived");
+
+  r.gw.forward();                          // uplink still down
+  CHECK(r.srv.gaps().empty() && r.gw.buffered() == 101,
+        "with no uplink it is held, not dropped");
+
+  r.uplink.setUp(true);
+  r.gw.forward();
+  CHECK(r.srv.gaps().size() == 1 && r.srv.gaps()[0].from == 1 && r.srv.gaps()[0].to == 50,
+        "when the uplink returns the server records 1-50 as lost");
+  CHECK(!memcmp(r.srv.gaps()[0].mac, mac, 32), "with the node's signature unchanged");
+  uint8_t d[32]; gapDigest(0x2001, 1, 50, d);
+  CHECK(r.signer.verify(d, r.srv.gaps()[0].mac), "which verifies against the device key");
+  CHECK(r.srv.held() == 100 && r.srv.lastAck(0x2001) == 150,
+        "and every surviving record is accepted after it");
+  CHECK(r.gw.stats().gapsForwarded == 1 && r.gw.buffered() == 0, "nothing left behind");
+}
+
+static void test_gateway_cannot_alter_gap() {
+  head("The gateway cannot alter a gap notice");
+  GapRig r;
+  r.uplink.setUp(false);
+  r.outOfRange(150);
+  r.node.resync();
+  r.gw.poll();
+  uint8_t frame[kRecBytes]; uint8_t kind = 0;
+  r.gbuf.peekAt(0, frame, kind);
+
+  // A compromised gateway widens the hole, to swallow readings it wants gone.
+  uint32_t dev, from, to; uint8_t mac[32];
+  decodeGapFrame(frame, dev, from, to, mac);
+  SimServer fresh; SimLink direct{fresh, r.signer};
+  CHECK(!direct.declareGap(dev, from, to + 20, mac) && fresh.gaps().empty(),
+        "a widened gap is refused: the signature covers the range");
+  mac[0] ^= 1;
+  CHECK(!direct.declareGap(dev, from, to, mac) && fresh.gaps().empty(),
+        "a notice with a changed signature is refused");
+}
+
+static void test_gateway_gap_overrun_is_counted() {
+  head("A gap notice lost to gateway overrun is counted");
+  GapRig r(30);                            // a gateway buffer smaller than the backlog
+  r.uplink.setUp(false);
+  r.outOfRange(150);
+  r.node.resync();
+  r.gw.poll();
+  CHECK(r.gw.stats().gapsReceived == 1, "the notice arrived");
+  CHECK(r.gw.stats().gapsDropped == 1, "and its loss is counted, not hidden");
+  CHECK(r.gw.stats().dropped == 70, "alongside the 70 records that went with it");
+}
+
 static void test_gateway_cannot_forge() {
   head("The gateway cannot make a record up");
   TruckRig r;
@@ -473,6 +571,9 @@ int main() {
   test_gateway_nothing_leaves_early();
   test_gateway_duplicates();
   test_gateway_overrun();
+  test_gateway_relays_gap();
+  test_gateway_cannot_alter_gap();
+  test_gateway_gap_overrun_is_counted();
   test_gateway_cannot_forge();
 
   std::printf("\n%d checks, %d failed\n", checks, failures);

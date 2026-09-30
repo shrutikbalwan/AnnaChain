@@ -89,6 +89,29 @@ def test_good_trip_rechecks_here_and_asks_for_the_full_walk(live):
     assert same is True, f"sha256js disagrees with WebCrypto at length {same}"
 
 
+def test_dashboard_draws_with_vendored_chartjs_and_no_network(live):
+    """Chart.js is served from backend/static; with every off-site request
+    blocked the dashboard still gets the real library, not the fallback."""
+    with playwright.sync_playwright() as p:
+        br = _browser(p)
+        page = br.new_page()
+        offsite, errors, bad = [], [], []
+        page.route("**/*", lambda route: (offsite.append(route.request.url), route.abort())
+                   if not route.request.url.startswith(live) else route.continue_())
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("response", lambda r: bad.append(f"{r.status} {r.url}") if r.status >= 400 else None)
+        page.goto(f"{live}/")
+        page.fill("input:not([type=password])", "operator")
+        page.fill("input[type=password]", "annachain")
+        page.press("input[type=password]", "Enter")
+        page.wait_for_timeout(2500)
+        has_chart = page.evaluate("typeof window.Chart === 'function'")
+        fallback = page.locator("text=charts drawn without Chart.js").count()
+        br.close()
+    assert has_chart and fallback == 0
+    assert offsite == [] and bad == [] and errors == []
+
+
 def test_doctored_reading_is_reported_on_the_page(live):
     c = db.conn()
     c.execute("UPDATE records SET temp_c = 23.9 WHERE device_id=? AND seq = 30", (DEV,))

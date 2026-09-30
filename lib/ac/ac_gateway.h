@@ -17,44 +17,55 @@
 // It follows that this file only ever copies bytes. If you find yourself
 // wanting to parse a reading and "fix" it here, stop: that is the oracle
 // problem walking back in through the side door.
+//
+// Gap notices get the same treatment. When a node's flash overruns, the node
+// signs a notice saying which records are gone. The gateway queues that notice
+// in the same FIFO as the records, so it reaches the server after the records
+// before the hole and before the ones after it, and hands it upstream exactly
+// as the node sent it. It reads the notice's fields only to pass them to the
+// uplink; it cannot change one without the server's signature check failing.
 #pragma once
 #include "ac_hal.h"
 
 namespace ac {
 
-// A FIFO of whole records, oldest first. Records from every node share it, in
-// arrival order, because that is the order they can be forwarded in.
+// A FIFO of whole frames, oldest first: records and gap notices from every
+// node share it, in arrival order, because that is the order they can be
+// forwarded in.
 class GwBuffer {
  public:
   explicit GwBuffer(uint32_t capacity) : cap_(capacity) {}
   ~GwBuffer() { delete[] buf_; }
 
   bool begin();
-  // Returns false only if the record could not be stored at all.
-  bool push(const uint8_t rec[kRecBytes]);
-  bool peek(uint8_t rec[kRecBytes]) const;
-  // Look at the n-th record from the front without removing anything. The
+  // Returns false only if the frame could not be stored at all.
+  bool push(const uint8_t frame[kRecBytes], uint8_t kind = FRAME_RECORD);
+  bool peek(uint8_t frame[kRecBytes]) const;
+  // Look at the n-th frame from the front without removing anything. The
   // forwarder builds a whole batch this way, so a link that dies mid-send
   // costs nothing.
-  bool peekAt(uint32_t n, uint8_t rec[kRecBytes]) const;
+  bool peekAt(uint32_t n, uint8_t frame[kRecBytes]) const;
+  bool peekAt(uint32_t n, uint8_t frame[kRecBytes], uint8_t& kind) const;
   void pop();
 
-  uint32_t count()    const { return count_; }
-  uint32_t capacity() const { return cap_; }
-  uint32_t dropped()  const { return dropped_; }   // overwritten before sending
-  bool     empty()    const { return count_ == 0; }
+  uint32_t count()       const { return count_; }
+  uint32_t capacity()    const { return cap_; }
+  uint32_t dropped()     const { return dropped_; }      // records overwritten before sending
+  uint32_t droppedGaps() const { return droppedGaps_; }  // gap notices overwritten, likewise
+  bool     empty()       const { return count_ == 0; }
 
  private:
-  uint32_t cap_, head_ = 0, tail_ = 0, count_ = 0, dropped_ = 0;
+  static const size_t kSlot = kRecBytes + 1;   // the kind, then the frame
+  uint32_t cap_, head_ = 0, tail_ = 0, count_ = 0, dropped_ = 0, droppedGaps_ = 0;
   uint8_t* buf_ = nullptr;
 };
 
-// The LoRa side. One packet in, one record out.
+// The LoRa side. One packet in, one frame out: a kind byte, then kRecBytes.
 struct IGatewayRadio {
   virtual ~IGatewayRadio() {}
   virtual bool begin() = 0;
   // Non-blocking. Returns false when nothing has arrived.
-  virtual bool receive(uint8_t rec[kRecBytes], int16_t& rssi) = 0;
+  virtual bool receive(uint8_t frame[kRecBytes], uint8_t& kind, int16_t& rssi) = 0;
   // Tell a node its record was taken into the gateway's buffer. This is a
   // hop-by-hop acknowledgement, not proof of delivery to the server — the node
   // still reconciles against the server's own last-ACK.
@@ -65,8 +76,11 @@ struct GwStats {
   uint32_t received = 0;
   uint32_t duplicates = 0;     // the same record heard twice
   uint32_t forwarded = 0;
-  uint32_t dropped = 0;        // buffer overran before the uplink came back
+  uint32_t dropped = 0;        // records lost: buffer overran before the uplink came back
   uint32_t batches = 0;
+  uint32_t gapsReceived = 0;   // gap notices heard from nodes
+  uint32_t gapsForwarded = 0;  // and handed upstream
+  uint32_t gapsDropped = 0;    // lost to overrun, counted exactly as records are
   uint32_t nodes = 0;          // distinct devices heard from
   int16_t  lastRssi = 0;
 };
@@ -81,8 +95,10 @@ class Gateway {
   // Drain whatever the radio has heard into the buffer. Call often.
   void poll();
 
-  // Push buffered records upstream, oldest first. Does nothing when the uplink
-  // is down, which is the entire point of the buffer.
+  // Push buffered frames upstream, oldest first: records in batches, gap
+  // notices one at a time, in queue order. Does nothing when the uplink is
+  // down, which is the entire point of the buffer. A frame the uplink does not
+  // take stays at the front and is tried again next time.
   void forward();
 
   const GwStats& stats() const { return s_; }

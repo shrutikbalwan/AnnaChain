@@ -248,7 +248,13 @@ $('loginForm').onsubmit = async (e) => {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({username: $('u').value, password: $('p').value}),
   });
-  if (!r.ok) { $('loginErr').textContent = 'Wrong username or password.'; return; }
+  if (!r.ok) {
+    let j = {}; try { j = await r.json(); } catch(e) {}
+    $('loginErr').textContent = r.status === 429
+      ? `Too many failed sign-ins. Try again in ${j.retry_after_s} s.`
+      : 'Wrong username or password.';
+    return;
+  }
   const j = await r.json();
   TOKEN = j.token;
   try { sessionStorage.setItem('ac_token', TOKEN); } catch(e) {}

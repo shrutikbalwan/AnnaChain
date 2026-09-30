@@ -1,38 +1,58 @@
 // AnnaChain — node firmware for the ESP32-S3.
 //
 //   pio run -e node_mock -t upload     fake sensor data, works with a bare board
-//   pio run -e node      -t upload     real SHT40 on I2C
+//   pio run -e node      -t upload     real SHT40 on I2C, USB serial link
+//   pio run -e node_lora -t upload     real SHT40, SX1262 to the gateway, PN532 taps
 //
-// Then on the laptop:  python3 tools/server.py /dev/ttyACM0
+// Then on the laptop, for the USB builds:  python backend/bridge_serial.py COM5
 //
 // The BOOT button is the antenna. Press it and the link goes down; the node
 // keeps sampling and keeps storing. Press it again and the gap fills itself.
+//
+// node_mock and node use only parts of the design that already run on the
+// laptop (the USB serial link, LittleFS). node_lora adds the SX1262 and PN532
+// drivers, which are UNPROVEN: they compile and have never met their chips.
+// Every pin comes from lib/ac/ac_pins.h, where each one is justified.
 #include <Arduino.h>
 #include "ac_node.h"
 #include "ac_esp.h"
+#include "ac_pins.h"
 #include "ac_sim.h"          // SimSensors doubles as the mock sensor on-board
+#ifdef AC_LINK_LORA
+#include "ac_lora.h"
+#endif
+#ifdef AC_NFC
+#include "ac_nfc.h"
+#endif
 
 using namespace ac;
 
-// ── wiring ────────────────────────────────────────────────────────────────
-static const uint32_t kDeviceId   = 0x26232001;   // per node; must be registered server-side
-static const uint8_t  kPinSDA     = 8;            // SHT40
-static const uint8_t  kPinSCL     = 9;
-static const int      kPinTamper  = 4;            // enclosure loop, to GND when closed
-static const int      kPinBattery = 5;            // 2:1 divider off the cell
-static const int      kPinButton  = 0;            // BOOT — stands in for the antenna
-static const uint32_t kSampleMs   = 5000;         // 5 s on the bench; 300000 in the field
+static const uint32_t kDeviceId = 0x26232001;   // per node; must be enrolled server-side
+static const uint32_t kSampleMs = 5000;         // 5 s on the bench; 300000 in the field
 
 // ── the pieces ────────────────────────────────────────────────────────────
-static ArduinoClock  clk(kClockBase);             // 25 Sep 2026; set properly from the server
+static ArduinoClock  clk(kClockBase);            // 25 Sep 2026; set properly from the server
 static LittleFsStore store(AC_LOG_CAPACITY);
 static EspSoftSigner signer;
+
+#ifdef AC_LINK_LORA
+static Sx1262Transport lora(pins::kLoraNss, pins::kLoraDio1, pins::kLoraReset,
+                            pins::kLoraBusy, pins::kLoraSck, pins::kLoraMiso,
+                            pins::kLoraMosi);
+static LoraNodeLink  link(lora);
+#else
 static SerialLink    link(Serial);
+#endif
 
 #ifdef AC_MOCK_SENSORS
 static SimSensors    sensors(42);
 #else
-static Sht40Sensors  sensors(kPinSDA, kPinSCL);
+static Sht40Sensors  sensors(pins::kSda, pins::kScl);
+#endif
+
+#ifdef AC_NFC
+static Pn532Reader   nfc(pins::kNfcIrq, pins::kNfcReset);
+static bool          nfcOk = false;
 #endif
 
 static Node node(kDeviceId, clk, sensors, store, link, signer);
@@ -49,6 +69,14 @@ static void banner() {
 #else
   Serial.println("# sensors: SHT40 on I2C");
 #endif
+#ifdef AC_LINK_LORA
+  Serial.printf("# link: SX1262 LoRa %s (UNPROVEN driver)\n", lora.ready() ? "up" : "NOT READY");
+#else
+  Serial.println("# link: USB serial");
+#endif
+#ifdef AC_NFC
+  Serial.printf("# NFC: PN532 %s (UNPROVEN driver)\n", nfcOk ? "ready" : "NOT FOUND");
+#endif
   char k[65]; signer.exportKeyHex(k);
   Serial.printf("K %u %s\n", kDeviceId, k);   // dev only: lets the laptop check signatures
   Serial.println("# press BOOT to drop the link, press again to restore it");
@@ -58,23 +86,41 @@ static void banner() {
 void setup() {
   Serial.begin(115200);
   delay(400);
-  pinMode(kPinButton, INPUT_PULLUP);
+  pinMode(pins::kButton, INPUT_PULLUP);
 
 #ifndef AC_MOCK_SENSORS
-  sensors.setTamperPin(kPinTamper);
-  sensors.setBatteryPin(kPinBattery);
+  sensors.setTamperPin(pins::kTamper);
+  sensors.setBatteryPin(pins::kBattery);
 #endif
 
   if (!node.begin()) {
     Serial.println("# FLASH FAILED — nothing can be trusted, halting");
     while (true) delay(1000);
   }
+#ifdef AC_LINK_LORA
+  int16_t rc = lora.begin();
+  if (rc) Serial.printf("# SX1262 begin failed, RadioLib code %d — still logging\n", rc);
+#endif
+#ifdef AC_NFC
+  nfcOk = nfc.begin();                          // after node.begin(): the I2C bus is up
+#endif
   banner();
 }
 
+#ifdef AC_NFC
+static void pollNfc() {
+  NfcTap tap;
+  if (!nfcOk || !nfc.poll(tap, 30)) return;
+  char uid[21] = {0};
+  for (uint8_t i = 0; i < tap.len && i < 10; ++i) sprintf(uid + 2 * i, "%02x", tap.uid[i]);
+  // T <device> <assign|tap> <uid> <unix>: bridge_serial.py makes a checkpoint of it.
+  Serial.printf("T %u %s %s %u\n", kDeviceId, tap.assign ? "assign" : "tap", uid, clk.now());
+}
+#endif
+
 void loop() {
   // The antenna pull.
-  bool b = digitalRead(kPinButton);
+  bool b = digitalRead(pins::kButton);
   if (lastButton && !b) {                           // pressed
     link.setUp(!link.up());
     Serial.printf("\n# LINK %s  (stored %u, waiting %u)\n",
@@ -89,9 +135,19 @@ void loop() {
   if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
-    if (cmd == "wipe") { store.format(); node.begin(); Serial.println("# flash wiped"); banner(); }
+    if (cmd == "wipe") {
+      store.format(); node.begin();
+#ifdef AC_NFC
+      nfc.resetAssignment();
+#endif
+      Serial.println("# flash wiped"); banner();
+    }
     else if (cmd == "stat") banner();
   }
+
+#ifdef AC_NFC
+  pollNfc();
+#endif
 
   if (millis() - lastSample >= kSampleMs) {
     lastSample = millis();

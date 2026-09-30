@@ -86,14 +86,15 @@ g++ -std=c++17 -Wall -DAC_LOG_CAPACITY=4096 -Ilib/ac $CORE tools/selftest.cpp -o
 
 ---
 
-## 2. Firmware behaviour — 78 automated checks
+## 2. Firmware behaviour — 92 automated checks
 
 ```bash
 ./selftest
 ```
 
-**Expected:** `78 checks, 0 failed` and `ALL GOOD`. (70 until the remediation
-pass; the 8 added are the signed gap notice and the clock base.)
+**Expected:** `92 checks, 0 failed` and `ALL GOOD`. (70 originally; 8 were
+added for the signed gap notice and the clock base, and 14 for gap notices
+crossing the truck gateway.)
 
 Read the section names as they scroll. They must include, and all pass:
 
@@ -109,9 +110,11 @@ Read the section names as they scroll. They must include, and all pass:
 - A gap notice is signed by the device — **C4**, **C6**
 - The board's clock starts on the date it claims
 - The sensor stops answering
-- Six gateway sections, ending with **"The gateway cannot make a record up"** — **C6**
+- Nine gateway sections, including **"A declared gap crosses the gateway"**,
+  **"The gateway cannot alter a gap notice"** and **"A gap notice lost to gateway
+  overrun is counted"**, ending with **"The gateway cannot make a record up"** — **C4**, **C6**
 
-**FAIL if:** the count is below 78, anything is red, or a section above is missing.
+**FAIL if:** the count is below 92, anything is red, or a section above is missing.
 
 Then the server's own suite:
 
@@ -120,8 +123,9 @@ python3 -m pip install -r backend/requirements-dev.txt
 python3 -m pytest backend/tests -q
 ```
 
-**Expected:** every test passes (111 at the time of writing; the two browser
-tests skip on a machine without Chrome or Playwright). **FAIL if** any test
+**Expected:** every test passes (124 at the time of writing; the browser
+tests skip on a machine without Chrome or Playwright, and the gateway
+end-to-end test skips without a C++ compiler). **FAIL if** any test
 fails, or `backend/tests/` is missing.
 
 ```bash
@@ -277,24 +281,24 @@ Then open in a browser:
   dropdown, node B marked SUSPECT, shelf-life card showing about **96.5%** and
   **57.9 days**, and the truck chart showing one line drifting away from two.
 
-**Check the browser console on all three pages. Expected: no errors** (a 404 for
-`chart.umd.min.js` is expected and harmless — the page falls back to drawing
-charts itself).
+**Check the browser console on all three pages. Expected: no errors at all.**
+Chart.js is served from `backend/static/`, so there is no 404 for it any more;
+one now is a failure.
 
 ---
 
 ## 7. The deck
 
 ```bash
-python3 -c "
-from pptx import Presentation
-p = Presentation('SIH2026_26232_AnnaChain_OfficialFormat.pptx')
-print('slides:', len(p.slides))
-print('old name present:', any('SecureHarvest' in s.text_frame.text
-      for sl in p.slides for s in sl.shapes if s.has_text_frame))"
+python3 tools/check_deck.py docs/SIH2026_26232_AnnaChain_OfficialFormat.pptx
 ```
 
-**Expected:** `slides: 6` (the official limit) and `old name present: False`.
+It looks in grouped shapes, tables, speaker notes, layouts, masters and document
+properties, not just text boxes, and in the PDF of the same name if it is there
+(`pip install pypdf` for that part).
+
+**Expected:** `slides: 6` (the official limit) and `old name present: False`,
+exit status 0. **FAIL if** the deck is missing: that is not a pass by default.
 
 ---
 
@@ -352,7 +356,65 @@ without `rotate=true` and an admin role. Node C's trace still says `chain_ok: tr
 
 **3. An honest gap (C4)** is covered by `backend/tests/test_gap.py`: records
 1–3, a signed gap for 4–5, then 6–10 must verify clean and read *"Complete, with
-a declared hole"*.
+a declared hole"*. Section 6c runs it through the truck gateway.
+
+```bash
+# 4. Guess the operator password (do this last: it locks this address for 30 s)
+for i in $(seq 1 6); do
+  curl -s -o /dev/null -w "%{http_code} " -X POST $B/api/login \
+    -H 'Content-Type: application/json' -d '{"username":"operator","password":"guess'$i'"}'
+done; echo
+curl -s -D - -o /dev/null -X POST $B/api/login -H 'Content-Type: application/json' \
+  -d '{"username":"operator","password":"annachain"}' | grep -i retry-after
+```
+
+**Expected:** `401 401 401 401 429 429`, then a `Retry-After:` header on the
+*correct* password: during the lock it is refused too.
+
+---
+
+## 6c. A declared gap through the truck gateway — C4 on the real path
+
+On the truck, a node never talks to the server. It talks LoRa to the gateway in
+the cab, and the gateway talks to the server. A gap notice that only works when
+the node reaches the server directly is true in the harness and false in the
+field. So this runs the story **through** the gateway.
+
+`dump --gateway` runs the real `Node` and `Gateway` code. The crate is out of
+LoRa range long enough for its 4,096-record flash to overrun; it comes back
+while the cab still has no signal, so its signed gap notice has to wait in the
+gateway's buffer; then the uplink returns. What the capture holds is what the
+gateway sent upstream.
+
+Use a **fresh database** (stop the server, `rm -f backend/annachain.db* backend/ledger.jsonl`,
+start it again): this capture uses node A's device id.
+
+```bash
+./dump --gateway 50 4200 > gw.capture
+grep -nE '^(G|#)' gw.capture
+python3 backend/feed_sim.py gw.capture --base $B --rate 5000 --silence 1
+curl -s "$B/api/verify/639836161?full=true" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['ok'],d['records'],d['declared_gaps'])"
+curl -s $B/api/trace/AC-26232001 | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['verdict'],'| lost',d['declared_lost'],'| chain',d['chain_ok'])"
+```
+
+**Expected:**
+
+- `dump` reports on stderr `gateway holding 4109 frames; gap notices heard: 1`, then
+  `forwarded 4158 records and 1 gap notice(s), dropped 0 records and 0 notices`.
+- In the capture, the only `G` line is `G 639836161 51 154 <64 hex>`, right after
+  `# online` and **before** every record after the hole.
+- `True 4158 [{'from': 51, 'to': 154}]`
+- `Complete, with a declared hole | lost 104 | chain True`
+
+**FAIL if** there is no `G` line (the gateway dropped the notice), the verdict
+says *altered*, or the feed reports that the server refused the notice.
+
+The firmware side is in `./selftest`: *"A declared gap crosses the gateway"*
+(byte for byte, held while the uplink is down, verifies against the device key
+at the server), *"The gateway cannot alter a gap notice"*, and *"A gap notice
+lost to gateway overrun is counted"*. `backend/tests/test_gateway_gap_e2e.py`
+runs this same path automatically, including a gateway that widens the hole and
+is refused.
 
 ---
 
@@ -363,11 +425,13 @@ half-done, which is worse than absent. `backend/README.md` lists each one, and
 the other remaining limitations, under *Honest about what this is not*.
 
 1. No running Fabric network (adapter only).
-2. No rate-limiting on failed logins.
-3. Chart.js is not vendored locally, so a dead CDN degrades the dashboard to
-   its fallback renderer.
-4. The truck gateway does not forward gap notices.
-5. A buyer's phone cannot check a signature until the ATECC608B makes it ECDSA.
+2. A buyer's phone cannot check a signature until the ATECC608B makes it ECDSA.
+3. Records the *gateway* drops on its own overrun are counted there but not
+   declared to the server.
+
+Done since the first verification, and no longer to be reported as missing:
+backend tests, login back-off, vendored Chart.js, gap notices through the
+gateway.
 
 ---
 
