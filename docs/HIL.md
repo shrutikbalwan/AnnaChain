@@ -14,6 +14,10 @@ their parts. Everything below is a procedure for finding out, not a description
 of something that works. When a step passes, paste its real output under it,
 with the date, and change nothing else.
 
+Power (the deck's 36 µA and 3.8 years) is not a step here: it needs hardware
+a DevKitC is not, and firmware that sleeps. [`POWER.md`](POWER.md) has the
+model, the measurement and what would falsify it.
+
 Irreversible actions (locking an ATECC608, erasing NVS, burning eFuses) are not
 in this file. They are in [`BRINGUP.md`](BRINGUP.md), which also has the smoke
 test's output format, the SX1262 troubleshooting table and the pin-check
