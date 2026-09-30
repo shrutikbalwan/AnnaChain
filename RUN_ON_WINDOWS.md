@@ -1,5 +1,12 @@
 # Running this on Windows
 
+> **`python3` and `python` may be two different Pythons.** On Windows,
+> `python3` is often the Microsoft Store's Python (3.14 on the team laptop)
+> with none of the backend's packages or Playwright, while `python` is the one
+> you installed them into. `mingw32-make` now picks the first of the two that
+> can import `fastapi` and `playwright` (and says which, before the backend
+> tests run). If it picks wrong, say so: `mingw32-make test PY=python`.
+
 Two ways. The first needs one install and takes five minutes; the second needs
 nothing but does not run the laptop demo.
 
