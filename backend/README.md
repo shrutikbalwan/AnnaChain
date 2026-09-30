@@ -11,9 +11,13 @@ It runs with no hardware at all.
 ## Run it
 
 ```powershell
-py -m pip install -r backend/requirements.txt
+py -m pip install -r backend/requirements.lock     # the exact versions tested
 py -m uvicorn backend.app:app --port 8000
 ```
+
+`requirements.txt` lists what the server needs, as ranges; `requirements.lock`
+pins the exact set the suite was last run against. On the venue laptop, install
+the lock.
 
 Open **http://127.0.0.1:8000**. It asks you to sign in.
 
