@@ -49,6 +49,14 @@ then replay it:
 py backend/feed_sim.py demo.capture --reset
 ```
 
+Before posting anything, the replayer asks the server how old a reading may be
+(`max_hold_s` in `/api/state`, which is `MAX_HOLD_S` in `checks.py`) and compares
+it with the capture's first record. Older than that, it stops with a non-zero
+exit, posts nothing, and prints `regenerate: mingw32-make fleet` and the replay
+command; older than a quarter of it, it warns and carries on. `--allow-stale`
+feeds an archived capture anyway, with a one-line warning — the server will
+still refuse the readings it considers too old.
+
 Enrolling the capture's devices is an operator action, so the replayer signs in
 — as `operator` / `annachain` unless you pass `--user` and `--password`.
 `--reset` wipes the server's data first. Feeding records never needs a login: a

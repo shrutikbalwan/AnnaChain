@@ -415,7 +415,7 @@ def truck_view(truck: str, who: str = Depends(operator)):
 def state(device: int | None = None, who: str = Depends(operator)):
     devs = db.devices()
     if not devs:
-        return {"devices": [], "waiting": True}
+        return {"devices": [], "waiting": True, "max_hold_s": checks.MAX_HOLD_S}
 
     if device is None:
         device = devs[0]["device_id"]
@@ -476,6 +476,9 @@ def state(device: int | None = None, who: str = Depends(operator)):
         "truck_alerts": [dict(a) for a in db.alerts(12)],
         "anchors": [dict(a) for a in db.anchors(device, 5)],
         "devices": [{"id": x["device_id"], "label": x["label"]} for x in devs],
+        # Read-only: how old a reading may be before check 5 refuses it. Tools
+        # (feed_sim.py) read it here rather than keep a second copy of it.
+        "max_hold_s": checks.MAX_HOLD_S,
     }
 
 

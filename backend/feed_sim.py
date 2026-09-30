@@ -22,7 +22,7 @@ sees nothing at all, exactly as it would on a real truck past Dhule — and then
 delivers the backlog in batches. Nobody has to be told what happened; it is
 visible.
 """
-import argparse, json, sys, time, urllib.request, urllib.error
+import argparse, json, struct, sys, time, urllib.request, urllib.error
 
 
 def post(base, path, payload, token=None):
@@ -35,6 +35,53 @@ def post(base, path, payload, token=None):
     )
     with urllib.request.urlopen(req, timeout=30) as r:
         return json.load(r)
+
+
+def get(base, path, token=None):
+    headers = {"Authorization": "Bearer " + token} if token else {}
+    req = urllib.request.Request(base + path, headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def first_timestamp(lines):
+    """The time of the first record in the capture: the oldest reading in it."""
+    for line in lines:
+        if line.startswith("R "):
+            return struct.unpack_from("<I", bytes.fromhex(line[2:]), 8)[0]
+    return None
+
+
+def check_age(capture, lines, window_s, allow_stale, now=None):
+    """Refuse, before anything is posted, a capture the server would refuse.
+
+    The server refuses a reading older than window_s (check 5, MAX_HOLD_S in
+    checks.py; read from /api/state, never copied here). Past the window every
+    record would be refused and nothing on the dashboard would say why. Past a
+    quarter of it, the capture is getting old: say so, and carry on."""
+    ts = first_timestamp(lines)
+    if ts is None or not window_s:
+        return
+    now = time.time() if now is None else now
+    age = now - ts
+    days, limit = age / 86400, window_s / 86400
+    again = ("regenerate: mingw32-make fleet\n"
+             f"replay:     python backend/feed_sim.py {capture} --reset")
+    if age > window_s:
+        if allow_stale:
+            print(f"warning: --allow-stale: feeding a capture {days:.1f} days old; the "
+                  f"server refuses readings older than {limit:.0f} days", file=sys.stderr)
+            return
+        print(f"\n{capture} is {days:.1f} days old. The server refuses readings older "
+              f"than {limit:.0f} days (check 5), so every record in it would be "
+              f"refused. Nothing was sent.\n{again}\n"
+              f"(--allow-stale feeds it anyway, for an archived capture.)",
+              file=sys.stderr)
+        sys.exit(2)
+    if age > window_s / 4:
+        print(f"warning: {capture} is {days:.1f} days old; the server refuses "
+              f"readings older than {limit:.0f} days. Feeding it; to start fresh:\n"
+              f"{again}", file=sys.stderr)
 
 
 def sign_in(base, username, password):
@@ -51,7 +98,7 @@ def sign_in(base, username, password):
         raise
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("capture", help="file produced by dump.exe")
     ap.add_argument("--base", default="http://127.0.0.1:8000")
@@ -63,15 +110,22 @@ def main():
                     help="records per request, matching the node's batch size")
     ap.add_argument("--reset", action="store_true",
                     help="wipe the server first (needs an operator login)")
+    ap.add_argument("--allow-stale", action="store_true",
+                    help="feed a capture older than the server's window anyway "
+                         "(an archived capture); the server will still refuse "
+                         "readings it considers too old")
     ap.add_argument("--user", default="operator")
     ap.add_argument("--password", default="annachain")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
 
     lines = [l.strip() for l in open(a.capture, encoding="utf-8-sig") if l.strip()]
     try:
         token = sign_in(a.base, a.user, a.password)
     except urllib.error.URLError as e:
         sys.exit(f"\ncannot reach {a.base} — is uvicorn running?  ({e})")
+    # Before anything is posted: would the server take these readings at all?
+    window = get(a.base, "/api/state", token=token).get("max_hold_s")
+    check_age(a.capture, lines, window, a.allow_stale)
     if a.reset:
         post(a.base, "/api/reset", {}, token=token)
         print("server wiped")
