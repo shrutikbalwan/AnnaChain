@@ -69,6 +69,9 @@ pio run -e smoke -t upload
 pio device monitor -b 115200            # Windows: add -p COM<n>
 ```
 
+The output appears only on the USB-C socket labelled **UART**, not the one
+labelled **USB** (upload works through either; see *Before any step*).
+
 **Expected output, in full** (angle brackets are values that differ per part;
 everything else is literal). The format is specified in
 [`BRINGUP.md`](BRINGUP.md#smoke-test-output-format).
