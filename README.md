@@ -2,6 +2,8 @@
 
 **SIH 2026 · PS 26232 · Low-Cost IoT Blockchain Nodes for Farm-to-Fork Traceability · MoFPI · Hardware**
 
+[![tests](https://github.com/shrutikbalwan/AnnaChain/actions/workflows/tests.yml/badge.svg)](https://github.com/shrutikbalwan/AnnaChain/actions/workflows/tests.yml)
+
 The claim this project makes is one sentence long:
 
 > A reading is signed and written to flash **before** any radio is touched, so a
