@@ -122,6 +122,8 @@ CREATE TABLE IF NOT EXISTS records (
   received  REAL NOT NULL,
   lag_s     INTEGER NOT NULL,   -- how late it arrived: 0 live, large after an outage
   raw       BLOB NOT NULL,      -- the 84 bytes the device sent: the evidence
+  uncertified INTEGER NOT NULL DEFAULT 0,  -- check 7: taken after the sensor's
+                                           -- EN 13486 verification had lapsed
   PRIMARY KEY (device_id, seq)
 );
 CREATE INDEX IF NOT EXISTS records_ts ON records(device_id, ts);
@@ -236,6 +238,8 @@ def _migrate(c):
     have = {r["name"] for r in c.execute("PRAGMA table_info(records)")}
     if "raw" not in have:
         c.execute("ALTER TABLE records ADD COLUMN raw BLOB")
+    if "uncertified" not in have:
+        c.execute("ALTER TABLE records ADD COLUMN uncertified INTEGER NOT NULL DEFAULT 0")
     have = {r["name"] for r in c.execute("PRAGMA table_info(gaps)")}
     if "mac" not in have:
         c.execute("ALTER TABLE gaps ADD COLUMN mac TEXT")
@@ -373,10 +377,10 @@ def insert_record(r: dict):
     conn().execute(
         "INSERT OR IGNORE INTO records"
         "(device_id,seq,ts,temp_c,rh_pct,c2h4_ppb,flags,batt_pct,"
-        " digest,prev,sig,received,lag_s,raw) "
+        " digest,prev,sig,received,lag_s,raw,uncertified) "
         "VALUES(:device,:seq,:ts,:temp_c,:rh_pct,:c2h4_ppb,:flags,:battery_pct,"
-        " :digest,:prev,:sig,:received,:lag_s,:raw)",
-        r,
+        " :digest,:prev,:sig,:received,:lag_s,:raw,:uncertified)",
+        {"uncertified": 0, **r},
     )
 
 
@@ -410,7 +414,7 @@ def records_window(device_id: int, limit: int = 1500):
     """Oldest-first, for charting. These are the index columns, not the evidence:
     whatever is drawn from them is only as good as verify() says it is."""
     rows = conn().execute(
-        "SELECT seq,ts,temp_c,rh_pct,c2h4_ppb,flags,batt_pct,lag_s FROM records "
+        "SELECT seq,ts,temp_c,rh_pct,c2h4_ppb,flags,batt_pct,lag_s,uncertified FROM records "
         "WHERE device_id=? ORDER BY seq DESC LIMIT ?",
         (device_id, limit),
     ).fetchall()

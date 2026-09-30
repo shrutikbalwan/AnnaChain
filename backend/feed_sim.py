@@ -114,6 +114,8 @@ def main(argv=None):
                     help="feed a capture older than the server's window anyway "
                          "(an archived capture); the server will still refuse "
                          "readings it considers too old")
+    ap.add_argument("--no-calibration", action="store_true",
+                    help="do not record a demo calibration for the capture's devices")
     ap.add_argument("--user", default="operator")
     ap.add_argument("--password", default="annachain")
     a = ap.parse_args(argv)
@@ -139,6 +141,22 @@ def main(argv=None):
                          f"different key. Start from a fresh database (make clean), "
                          f"or rotate the key deliberately as an admin.")
             raise
+
+    # Check 7 needs a calibration to check. A demo device has no certificate, so
+    # record a plausible one and say that it is a demo: verified 60 days before
+    # the trip, on the usual 12-month EN 13486 interval.
+    trip_start = first_timestamp(lines) or time.time()
+    cal_date = trip_start - 60 * 86400
+
+    def calibrate(dev):
+        if a.no_calibration:
+            return
+        post(a.base, f"/api/calibration/{dev}",
+             {"cal_date": cal_date, "months": 12,
+              "ref": "DEMO calibration record, no certificate (feed_sim.py)"},
+             token=token)
+        print(f"  calibration: DEMO record, verified "
+              f"{time.strftime('%d %b %Y', time.gmtime(cal_date))}, 12-month interval")
 
     device, pending, sent, offline, offline_done = None, [], 0, False, False
     keys = {}                     # device -> key hex, until the label line arrives
@@ -181,6 +199,7 @@ def main(argv=None):
             keys[device] = key
             enrol({"device": device, "key_hex": key})
             print(f"registered device {device:08X}")
+            calibrate(device)
 
         elif line.startswith("L "):
             # L <device> <truck> <label...>  — names the node and its truck

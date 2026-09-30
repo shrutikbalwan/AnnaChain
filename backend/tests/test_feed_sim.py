@@ -87,6 +87,21 @@ def test_a_fresh_capture_feeds(client, run, tmp_path, capsys):
     assert "stale" not in capsys.readouterr().err.lower()
 
 
+def test_the_demo_devices_get_a_plausible_calibration(client, run, tmp_path, capsys):
+    """EN 13486 asks for periodic verification; 12 months is the usual interval.
+    The replayer records one per enrolled device, labelled as a demo record, so
+    check 7 has something real to check and the dashboard says so."""
+    from backend import db
+    run(capture(tmp_path, 3600), "--rate", "1000")
+    d = db.device(DEV)
+    assert d["cal_months"] == 12 and d["cal_date"] < time.time()
+    assert "demo" in d["cal_ref"].lower()
+    assert "calibration" in capsys.readouterr().out.lower()
+    marks = [r["uncertified"] for r in db.conn().execute(
+        "SELECT uncertified FROM records WHERE device_id=?", (DEV,))]
+    assert marks == [0] * 10
+
+
 def test_a_stale_capture_exits_non_zero_and_posts_nothing(client, run, tmp_path, capsys):
     with pytest.raises(SystemExit) as e:
         run(capture(tmp_path, WINDOW + 2 * DAY), "--reset")

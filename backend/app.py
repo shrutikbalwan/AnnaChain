@@ -76,6 +76,14 @@ recovering = {}              # device -> how long the silence was, while drainin
 
 
 CAL_DEFAULT_MONTHS = 12          # EN 13486 verification interval
+MONTH_S = 2629800                # a mean month, 30.44 days
+
+
+def cal_due(d):
+    """When this device's calibration had to be renewed, or None if none is recorded."""
+    if not d or not d["cal_date"]:
+        return None
+    return d["cal_date"] + (d["cal_months"] or CAL_DEFAULT_MONTHS) * MONTH_S
 chain = ledger.get_ledger()      # Fabric if it is really there, else local
 
 
@@ -222,6 +230,35 @@ def register(reg: Registration, who: str = Depends(operator)):
     return {"ok": True, "device": reg.device, "last_ack": d["last_ack"]}
 
 
+# ── calibration (check 7): an operator action ───────────────────────────
+class Calibration(BaseModel):
+    cal_date: float                  # unix time the sensor was last verified
+    months: int = CAL_DEFAULT_MONTHS # EN 13486 verification interval
+    ref: str | None = None           # who verified it, against what reference
+
+
+@app.post("/api/calibration/{device}")
+def set_calibration(device: int, cal: Calibration, who: str = Depends(operator)):
+    """Record a sensor's last verification (EN 13486). Readings taken after it
+    lapses are still stored, raise a `calibration` alert and are marked
+    `uncertified`. Audited: who recorded which date against which reference."""
+    d = db.device(device)
+    if not d:
+        raise HTTPException(404, "unknown device")
+    if not 1 <= cal.months <= 60:
+        raise HTTPException(400, "months must be between 1 and 60")
+    if cal.cal_date > time.time() + 86400:
+        raise HTTPException(400, "a calibration cannot be dated in the future")
+    db.set_calibration(device, cal.cal_date, cal.months, cal.ref)
+    db.audit(who, "calibration", device,
+             f"verified {time.strftime('%Y-%m-%d', time.gmtime(cal.cal_date))}, "
+             f"interval {cal.months} months, ref: {cal.ref or '(none given)'}")
+    due = cal_due(db.device(device))
+    return {"ok": True, "device": device, "cal_date": cal.cal_date,
+            "months": cal.months, "ref": cal.ref, "due": due,
+            "lapsed": due < time.time()}
+
+
 # ── the node's calls ─────────────────────────────────────────────────────
 
 
@@ -282,10 +319,8 @@ def ingest(body: Ingest):
             "SELECT 1 FROM records WHERE device_id=? AND seq=?", (dev, r["seq"])
         ).fetchone())
 
-        cal_due = None
-        if d and d["cal_date"]:
-            cal_due = d["cal_date"] + (d["cal_months"] or CAL_DEFAULT_MONTHS) * 2629800
-        ok, parsed, digest, reason = verifier.check(raw, key, seen, cal_due, now=now)
+        due = cal_due(d)
+        ok, parsed, digest, reason = verifier.check(raw, key, seen, due, now=now)
         if not ok:
             rejected += 1
             first_reason = first_reason or reason
@@ -301,10 +336,11 @@ def ingest(body: Ingest):
         parsed["received"] = now
         parsed["lag_s"] = lag
         parsed["stale_calibration"] = dev in verifier.stale_calibration
+        parsed["uncertified"] = int(parsed["stale_calibration"])   # stored with it
         db.insert_record(parsed)
         engine.on_record(parsed, ship)
         if parsed["stale_calibration"]:
-            engine.on_stale_calibration(dev, d["cal_date"], cal_due)
+            engine.on_stale_calibration(dev, d["cal_date"], due)
         touched[dev] = max(touched.get(dev, 0), parsed["ts"])
         accepted += 1
 
@@ -452,6 +488,7 @@ def state(device: int | None = None, who: str = Depends(operator)):
         "h": None if (r["flags"] & checks.FLAG_SENSORBAD) else r["rh_pct"],
         "e": r["c2h4_ppb"], "b": r["batt_pct"],
         "lag": r["lag_s"], "f": r["flags"],
+        "u": bool(r["uncertified"]),      # check 7: calibration had lapsed
     } for r in rows]
 
     recovered = db.conn().execute(

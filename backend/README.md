@@ -355,11 +355,16 @@ accurate.
   `docs/SIH2026_26232_AnnaChain_OfficialFormat.pptx`, and no file of that name
   exists yet. The only 26232 deck found (`SIH2026_26232_SecureHarvest_OfficialFormat.pptx`)
   has 6 slides but still carries the old name on slides 1, 2 and 5.
-- **Calibration (check 7) is implemented but unpopulated.** Each device carries
-  a calibration date and an EN 13486 interval; a lapsed sensor raises an alert
-  and its readings are marked as uncertified. The readings are still stored —
-  refusing them would throw away the only record of the journey. What does not
-  exist yet is a real calibration registry with real certificates in it.
+- **Calibration (check 7) is implemented, with demo data only.** Each device
+  carries a calibration date and an EN 13486 interval, set by an operator with
+  `POST /api/calibration/<device>` (`cal_date`, `months`, `ref`; audited). A
+  reading taken after it lapses is still stored — refusing it would throw away
+  the only record of the journey — but it raises a `calibration` alert and is
+  stored with `uncertified = 1` (`u` in `/api/state`). `feed_sim.py` records a
+  **demo** calibration for each device it enrols (60 days before the trip, 12
+  months, `ref` saying it is a demo with no certificate; `--no-calibration`
+  skips it). What does not exist is a real calibration registry with real
+  certificates in it, and neither page shows the `uncertified` mark yet.
 - **The ethylene rule is a rise against the trip's own baseline**, not an
   absolute ppb threshold, because we have not chosen a sensor and will not quote
   a calibrated number we cannot measure.
