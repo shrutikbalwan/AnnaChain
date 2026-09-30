@@ -54,7 +54,22 @@ constexpr int kScl = 9;
 
 // ── node inputs ──────────────────────────────────────────────────────────
 // Tamper reed loop, to GND when the lid is shut. GPIO4 [UG J1-4], P2.
+// INPUT_PULLUP: a shut lid closes the reed and pulls GPIO4 LOW = sealed. HIGH
+// (the pull-up wins) = the loop is open = FLAG_TAMPER. That is deliberate and
+// it is fail-closed: a lid opened, a loop cut, a connector pulled and a reed
+// missing all read HIGH, so all of them are reported. Inverting the sense (or
+// using a pull-down) would make a cut or unplugged loop read as sealed, which
+// is the one failure a tamper sensor must never have.
+//
+// So a BENCH board with nothing on GPIO4 reports tamper on every record, and
+// that is correct: nothing is holding its seal shut. For bench work fit the
+// jumper GPIO4 to GND (docs/HIL.md step 1), which is a closed loop by
+// definition. Only builds that read the pin need it: node and node_lora
+// (Sht40Sensors); node_mock's SimSensors never report tamper.
 constexpr int kTamper  = 4;
+// What a level on kTamper means. true = tamper. Kept here, not inline in the
+// driver, so tools/selftest.cpp pins the fail-closed sense down.
+constexpr bool tamperFromLevel(bool levelHigh) { return levelHigh; }
 // Battery through a 2:1 divider. GPIO5 = ADC1_CH4 [UG J1-5]. It must be an
 // ADC1 pin: ADC2 is unusable whenever Wi-Fi is on [DS §4.2.2.1].
 constexpr int kBattery = 5;

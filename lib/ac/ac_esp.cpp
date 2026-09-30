@@ -1,6 +1,8 @@
 #ifdef ARDUINO
 #include "ac_esp.h"
 #include "ac_sha256.h"
+#include "ac_batt.h"
+#include "ac_pins.h"
 #include <Preferences.h>
 #include <Wire.h>
 
@@ -140,11 +142,11 @@ Reading Sht40Sensors::read() {
   v.ok = false;
 #endif
   v.c2h4 = kEthyleneNotFitted;              // no ethylene sensor chosen yet — say so
-  if (tamperPin_ >= 0) v.tamper = (digitalRead(tamperPin_) == HIGH);
+  // HIGH = open loop = tamper, fail-closed (ac_pins.h: why not inverted).
+  if (tamperPin_ >= 0) v.tamper = pins::tamperFromLevel(digitalRead(tamperPin_) == HIGH);
   if (battPin_ >= 0) {
     uint32_t mv = analogReadMilliVolts(battPin_) * 2;     // 2:1 divider
-    int pct = (int)((mv - 3300) * 100 / (4200 - 3300));   // rough Li-ion curve
-    v.batt = (uint8_t)(pct < 0 ? 0 : pct > 100 ? 100 : pct);
+    v.batt = batteryPercent(mv);                          // ac_batt.h, tested in selftest
   } else {
     v.batt = 100;
   }
@@ -157,7 +159,7 @@ static void putHex(Stream& io, const uint8_t* p, size_t n) {
   for (size_t i = 0; i < n; ++i) { io.write(d[p[i] >> 4]); io.write(d[p[i] & 15]); }
 }
 
-bool SerialLink::waitAck(uint32_t& value) {
+bool SerialLink::waitAck(uint32_t& value, uint32_t* time) {
   uint32_t t0 = millis();
   String line;
   while (millis() - t0 < timeout_) {
@@ -165,7 +167,14 @@ bool SerialLink::waitAck(uint32_t& value) {
       char c = (char)io_.read();
       if (c == '\n') {
         line.trim();
-        if (line.startsWith("A ")) { value = (uint32_t)line.substring(2).toInt(); return true; }
+        if (line.startsWith("A ")) {
+          // "A <seq>" or "A <seq> <unix>". toInt() stops at the space, so a
+          // board that predates the time field reads the seq and ignores it.
+          value = (uint32_t)line.substring(2).toInt();
+          int sp = line.indexOf(' ', 2);
+          if (time) *time = sp > 0 ? (uint32_t)strtoul(line.c_str() + sp + 1, nullptr, 10) : 0;
+          return true;
+        }
         if (line.startsWith("N "))  return false;      // the server said no
         line = "";
       } else if (c != '\r') {
@@ -179,9 +188,10 @@ bool SerialLink::waitAck(uint32_t& value) {
 }
 
 bool SerialLink::queryLastAck(uint32_t device, uint32_t& lastAck) {
+  time_ = 0;
   if (!up_) return false;
   io_.printf("Q %u\n", device);
-  return waitAck(lastAck);
+  return waitAck(lastAck, &time_);
 }
 
 bool SerialLink::send(const uint8_t* recs, size_t count, uint32_t& acked) {

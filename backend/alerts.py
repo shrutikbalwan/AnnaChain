@@ -18,7 +18,10 @@ EXCURSION_MIN = 3          # consecutive readings (15 minutes at 5-minute sampli
 ETHYLENE_RISE = 1.30       # 30% above this trip's own opening baseline
 ETHYLENE_MIN_DELTA = 5     # ...and at least this many ppb, so noise cannot trip it
 ETHYLENE_BASELINE_N = 12   # readings used to establish the baseline
-BATTERY_LOW_PCT = 20
+BATTERY_LOW_PCT = 20       # below this, a "battery" alert. Until 1 Oct 2026 it could not
+                           # fire from a real board: the node's unsigned arithmetic
+                           # turned a flat cell into 100 % (lib/ac/ac_batt.h). Below
+                           # 20 % is under 3.48 V on the node's 3.3-4.2 V curve.
 DISAGREE_C = 1.5           # two SHT40s should agree far better than this
 DISAGREE_RUNS = 3          # consecutive buckets before a node is called suspect
 SILENT_ALERT_S = 60        # real seconds with no ingest before we say a node is quiet
@@ -192,6 +195,31 @@ class AlertEngine:
         if st["last_bucket"] == bucket:
             return None
         st["last_bucket"] = bucket
+        st.setdefault("agree", {})
+
+        # A suspect node earns its trust back the way it lost it: DISAGREE_RUNS
+        # consecutive buckets, here agreeing with the median of the others
+        # (within DISAGREE_C). One agreeing bucket is noise, exactly as one
+        # disagreeing bucket is. Without this a recovered node stayed suspect
+        # until the database was reset, and since S4 persisted the suspect set,
+        # for ever (P3).
+        cleared = None
+        for dev in [d for d in readings if d in self.suspect]:
+            others = sorted(v for k, v in readings.items() if k != dev)
+            if not others:
+                continue
+            med = others[len(others) // 2] if len(others) % 2 else \
+                (others[len(others) // 2 - 1] + others[len(others) // 2]) / 2
+            if abs(readings[dev] - med) < DISAGREE_C:
+                st["agree"][dev] = st["agree"].get(dev, 0) + 1
+                if st["agree"][dev] >= DISAGREE_RUNS:
+                    st["agree"].pop(dev)
+                    self.clear_suspect(dev)
+                    cleared = dev
+            else:
+                st["agree"].pop(dev, None)
+        if cleared is not None:
+            st["run"].pop(cleared, None)
 
         items = sorted(readings.items(), key=lambda kv: kv[1])
         lo_dev, lo_t = items[0]

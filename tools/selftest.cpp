@@ -8,10 +8,13 @@
 #include "ac_node.h"
 #include "ac_gateway.h"
 #include "ac_sim.h"
+#include "ac_batt.h"
+#include "ac_pins.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <string>
+#include <ctime>
 
 using namespace ac;
 
@@ -331,7 +334,13 @@ static void test_gap_notice_signed() {
         "the device's own notice is accepted");
 }
 
-// ── 9c. the clock starts where the comment says it does ──────────────────
+// ── 9c. the clock starts at the build, not at a date typed in by hand ─────
+// This replaced "kClockBase is 25 Sep 2026". That test checked a constant
+// against the comment above it, and both were right: the defect was that a
+// constant date is a claim that goes stale. The property that matters is that a
+// freshly built board starts within hours of true time and never ahead of it,
+// so that is what is checked now, against this machine's clock. The date the
+// old test pinned survives as a vector for the parser.
 static void civil(uint32_t t, int& y, unsigned& m, unsigned& d) {
   // days since 1970-01-01 to a calendar date (Howard Hinnant's algorithm)
   long z = (long)(t / 86400) + 719468;
@@ -346,11 +355,153 @@ static void civil(uint32_t t, int& y, unsigned& m, unsigned& d) {
 }
 
 static void test_clock_base() {
-  head("The board's clock starts on the date it claims");
+  head("The board's clock starts at its build time, not at a fixed date");
+  CHECK(buildTime("Sep 25 2026", "00:00:00") == 1790294400u,
+        "__DATE__/__TIME__ parse: \"Sep 25 2026 00:00:00\" is 1790294400");
+  CHECK(buildTime("Jan  1 1970", "00:00:00") == 0u && buildTime("Feb 29 2028", "23:59:59") == 1835481599u
+        && buildTime("Oct  1 2026", "12:34:56") == 1790858096u,
+        "space-padded days, a leap day and a time of day parse too");
   int y; unsigned m, d;
-  civil(kClockBase, y, m, d);
-  CHECK(y == 2026 && m == 9 && d == 25, "kClockBase is 25 Sep 2026");
-  CHECK(kClockBase % 86400 == 0, "at 00:00 UTC");
+  civil(buildTime(__DATE__, "00:00:00"), y, m, d);
+  CHECK((unsigned)y == clockbase::year(__DATE__) && m == clockbase::month(__DATE__) &&
+        d == clockbase::day(__DATE__), "the compiler's own date round-trips");
+  long long now = (long long)time(nullptr);   // not long: 32 bits on Windows until 2038
+#ifdef AC_CLOCK_BASE
+  CHECK(kClockBase == (uint32_t)(AC_CLOCK_BASE), "AC_CLOCK_BASE overrides the build time exactly");
+  (void)now;
+#else
+  // Local build time minus 14 h: never ahead of UTC, at most 26 h behind it,
+  // plus an hour for the time between compiling this and running it.
+  CHECK((long long)kClockBase <= now, "kClockBase is not ahead of this machine's clock");
+  CHECK(now - (long long)kClockBase <= 27LL * 3600,
+        "and not more than 27 h behind it (zone margin 26 h + 1 h to run)");
+#endif
+  CHECK(FLAG_TIMEUNSET == 0x80 && !(FLAG_TIMEUNSET & (FLAG_TAMPER | FLAG_MOVED | FLAG_CHARGING |
+        FLAG_COLD | FLAG_SELFTEST | FLAG_SENSORBAD | FLAG_SIMULATED)),
+        "FLAG_TIMEUNSET is bit 7, the last free bit");
+}
+
+// ── 9d. the node's clock: set by the server, never backwards ──────────────
+static Record recAt(IStore& st, uint32_t seq) {
+  uint8_t raw[kRecBytes]; Record r;
+  if (st.read(seq, raw)) decode(raw, r);
+  return r;
+}
+
+static void test_clock_reboot_never_backwards() {
+  head("A node that reboots never stamps a record earlier than its last");
+  MemStore st{4096}; SoftSigner sg; SimServer srv; SimLink ln{srv, sg};
+  SimSensors sns{5};
+  ln.setUp(false);                                // no server, ever: flagged throughout
+  SimClock board{kClockBase, false};              // power-up: uptime from kClockBase
+  { Node n{0x7001, board, sns, st, ln, sg}; n.begin();
+    for (int i = 0; i < 12; ++i) { n.tick(); board.advance(300); } }
+  uint32_t last = recAt(st, 12).ts;
+  SimClock again{kClockBase, false};              // millis() restarts at zero
+  Node n{0x7001, again, sns, st, ln, sg}; n.begin();
+  n.tick();
+  CHECK(recAt(st, 13).ts >= last, "after a reboot the next timestamp is no earlier than the last");
+  bool flagged = true;
+  for (uint32_t s = 1; s <= 13; ++s) flagged = flagged && (recAt(st, s).flags & FLAG_TIMEUNSET);
+  CHECK(flagged, "and a node that never reached a server flags every record");
+}
+
+static void test_clock_set_by_server() {
+  head("A node given the server's time adopts it; records before contact are flagged");
+  MemStore st{4096}; SoftSigner sg; SimServer srv; SimLink ln{srv, sg};
+  SimSensors sns{6};
+  SimClock board{kClockBase, false};
+  SimClock truth{kClockBase + 20u * 3600u};       // the server: 20 h later than the build base
+  ln.setServerClock(&truth);
+  ln.setUp(false);
+  Node n{0x7002, board, sns, st, ln, sg}; n.begin();
+  auto step = [&](uint32_t boardExtra) { board.advance(300 + boardExtra); truth.advance(300); };
+  for (int i = 0; i < 5; ++i) { n.tick(); step(0); }
+  ln.setUp(true);
+  n.tick(); step(0);                              // record 6 is stored, then first contact
+  n.tick();                                       // record 7: the first after contact
+  bool before = true;
+  for (uint32_t s = 1; s <= 6; ++s) before = before && (recAt(st, s).flags & FLAG_TIMEUNSET);
+  CHECK(before, "records 1-6, taken before first contact, carry FLAG_TIMEUNSET");
+  CHECK(!(recAt(st, 7).flags & FLAG_TIMEUNSET), "record 7, after it, does not");
+  CHECK(recAt(st, 7).ts == truth.now(), "and is stamped with the server's time");
+  CHECK(srv.held() == 7, "the server took all seven");
+
+  // A clock that ran ahead between syncs: re-set to a server time earlier than
+  // the last record it stamped.
+  for (int i = 0; i < 5; ++i) { step(400); n.tick(); }
+  uint32_t prev = recAt(st, st.lastSeq()).ts;
+  CHECK(prev > truth.now(), "(the board's clock has run ahead of the server's)");
+  step(0); n.tick();
+  CHECK(recAt(st, st.lastSeq()).ts >= prev, "a re-set to an earlier time does not step a record backwards");
+  CHECK(!(recAt(st, st.lastSeq()).flags & FLAG_TIMEUNSET), "and never flags again");
+
+  // Reboot with no server: the clock was set, so no flag, and no going back.
+  ln.setUp(false);
+  uint32_t lastTs = recAt(st, st.lastSeq()).ts, lastSeq = st.lastSeq();
+  SimClock again{kClockBase, false};
+  Node n2{0x7002, again, sns, st, ln, sg}; n2.begin();
+  n2.tick();
+  Record r = recAt(st, lastSeq + 1);
+  CHECK(!(r.flags & FLAG_TIMEUNSET) && r.ts >= lastTs,
+        "after a reboot a node whose clock was set resumes after its last timestamp, unflagged");
+}
+
+static void test_clock_via_gateway() {
+  head("The time reaches a LoRa node through the gateway");
+  for (int serverGivesTime = 0; serverGivesTime < 2; ++serverGivesTime) {
+    SimClock   truth{kClockBase + 30u * 3600u};  // gateway (NTP) and server share true time
+    SimRadio   radio;
+    SoftSigner sg;
+    SimServer  srv;
+    SimLink    up{srv, sg};
+    if (serverGivesTime) up.setServerClock(&truth);
+    GwBuffer   gbuf{100};
+    Gateway    gw{0xAA0009, truth, radio, gbuf, up};
+    gw.begin();
+    SimClock   board{kClockBase, false};
+    SimSensors sns{7}; MemStore st{4096};
+    SimNodeToGateway link{radio};
+    link.attach(&gw, true);
+    Node n{0x7003, board, sns, st, link, sg}; n.begin();
+    n.tick(); board.advance(300); truth.advance(300);
+    n.tick(); gw.poll(); gw.forward();
+    CHECK((recAt(st, 1).flags & FLAG_TIMEUNSET) && !(recAt(st, 2).flags & FLAG_TIMEUNSET) &&
+          recAt(st, 2).ts == truth.now(),
+          serverGivesTime ? "the server's time, relayed by the gateway, sets the node's clock"
+                          : "with no time from the server, the gateway's NTP clock sets it");
+    CHECK(srv.held() == 2, "and both records reach the server");
+  }
+}
+
+// ── 9e. a flat battery reads flat ──────────────────────────────────────────
+// The ADC reading is unsigned. Below 3.3 V, `mv - 3300` wrapped to about four
+// billion before the clamp could see a negative number, so a dying node
+// reported a full battery and alerts.py's battery rule (BATTERY_LOW_PCT) could
+// never fire from a real board.
+static void test_battery_percent() {
+  head("Battery millivolts to percent, at the edges");
+  CHECK(batteryPercent(3000) == 0,   "3.0 V (below empty) reads 0 %, not 100 %");
+  CHECK(batteryPercent(3300) == 0,   "3.3 V reads 0 %");
+  CHECK(batteryPercent(3750) == 50,  "3.75 V reads 50 %");
+  CHECK(batteryPercent(4200) == 100, "4.2 V reads 100 %");
+  CHECK(batteryPercent(4500) == 100, "4.5 V (above full) reads 100 %");
+  CHECK(batteryPercent(0) == 0,      "0 V (divider not connected) reads 0 %");
+  CHECK(batteryPercent(3479) == 19 && batteryPercent(3480) == 20,
+        "the low-battery alert (below 20 %) starts under 3.48 V");
+}
+
+// ── 9f. the tamper loop fails closed ─────────────────────────────────────
+// GPIO4 has its pull-up on and the reed loop pulls it to GND when the lid is
+// shut. "Enable the pull-up and invert" was proposed so that a bare bench board
+// would stop reporting tamper; it would also make a cut or unplugged loop read
+// as sealed. The bench gets a jumper instead (docs/HIL.md step 1).
+static void test_tamper_fails_closed() {
+  head("The tamper loop fails closed");
+  CHECK(pins::tamperFromLevel(true),
+        "HIGH (lid open, loop cut, connector pulled, nothing fitted) is tamper");
+  CHECK(!pins::tamperFromLevel(false), "LOW (the loop, or the bench jumper, to GND) is sealed");
+  CHECK(pins::kTamper == 4, "on GPIO4, where HIL.md step 1 puts the jumper");
 }
 
 // ── 10. a sensor that stops answering ─────────────────────────────────────
@@ -772,6 +923,11 @@ int main() {
   test_ring_wrap();
   test_gap_notice_signed();
   test_clock_base();
+  test_clock_reboot_never_backwards();
+  test_clock_set_by_server();
+  test_clock_via_gateway();
+  test_battery_percent();
+  test_tamper_fails_closed();
   test_sensor_fault();
   test_gateway_basic();
   test_gateway_buffers_when_uplink_dies();

@@ -31,11 +31,19 @@
 
 using namespace ac;
 
-static const uint32_t kDeviceId = 0x26232001;   // per node; must be enrolled server-side
+// The real board's id: 26232101 (decimal 639836417). NOT 26232001-26232003,
+// which the laptop demos (native, dump, fleet, the seed capture) enrol with
+// published dev keys: on a database that had seen a demo, a board sharing one
+// of those ids was refused and every record failed "bad signature" (P4,
+// docs/HIL.md step 1). A second board: -DAC_DEVICE_ID=0x26232102, and so on.
+#ifndef AC_DEVICE_ID
+#define AC_DEVICE_ID 0x26232101
+#endif
+static const uint32_t kDeviceId = AC_DEVICE_ID;  // per node; must be enrolled server-side
 static const uint32_t kSampleMs = 5000;         // 5 s on the bench; 300000 in the field
 
 // ── the pieces ────────────────────────────────────────────────────────────
-static ArduinoClock  clk(kClockBase);            // 25 Sep 2026; set properly from the server
+static ArduinoClock  clk(kClockBase);            // build time; set from the server's last-ACK answer
 static LittleFsStore store(AC_LOG_CAPACITY);
 static EspSoftSigner signer;
 

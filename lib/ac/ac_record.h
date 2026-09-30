@@ -47,6 +47,13 @@ enum Flags : uint8_t {
   // fitted (dump/fleet --ethylene); the board has none. Mock temperatures
   // (node_mock, dump, fleet) do NOT set it. Inside the signature, like every flag.
   FLAG_SIMULATED = 1 << 6,
+  // The timestamp is uptime counted from kClockBase, not wall-clock time: the
+  // record was taken before any server told this node the time. It is signed
+  // and cannot be re-stamped, so it says so instead. Once a node's clock has
+  // been set it never sets this again (Node::tick), and the server refuses a
+  // flagged record from a device whose clock it has already seen set.
+  // This is the LAST free bit: the flags byte is now full (docs/CRYPTO.md).
+  FLAG_TIMEUNSET = 1 << 7,
 };
 
 constexpr uint16_t kEthyleneNotFitted = 0xFFFF;

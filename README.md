@@ -188,8 +188,8 @@ cut, the behaviour under a link that dies mid-batch.
   you know why the part is in the BOM.
 - No ethylene sensor is read. The field is present and set to *not fitted*, which
   is the honest thing to transmit until the part is chosen.
-- The clock starts from a compiled-in base until NTP or an RTC is added. The
-  server's timestamp check is what catches a wrong one.
+- The node's clock starts at its build time and is set from the server's time,
+  which comes with every last-ACK; records before that are flagged (docs/HIL.md step 1).
 - `verifyChain` walks the whole ring. Fine at 4096 records; it wants a windowed
   version before a 90-day deployment.
 

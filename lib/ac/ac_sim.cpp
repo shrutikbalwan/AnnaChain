@@ -153,8 +153,10 @@ void SimServer::noteGap(uint32_t device, uint32_t from, uint32_t to,
 
 // ── SimLink ───────────────────────────────────────────────────────────────
 bool SimLink::queryLastAck(uint32_t device, uint32_t& lastAck) {
+  timed_ = false;
   if (!up_) return false;
   lastAck = srv_.lastAck(device);
+  timed_ = true;                       // this answer carries the time, if there is a clock
   return true;
 }
 
@@ -214,6 +216,7 @@ bool SimRadio::receive(uint8_t frame[kRecBytes], uint8_t& kind, int16_t& rssi) {
 
 // ── SimNodeToGateway ──────────────────────────────────────────────────────
 bool SimNodeToGateway::queryLastAck(uint32_t device, uint32_t& lastAck) {
+  time_ = 0;
   if (!up_) return false;
   if (!gw_) { lastAck = ack_; return true; }     // a node that never asks (see ac_sim.h)
 
@@ -228,6 +231,7 @@ bool SimNodeToGateway::queryLastAck(uint32_t device, uint32_t& lastAck) {
     if (rs[i].device != device) continue;
     if (!rs[i].known) return false;              // no value: keep what we know
     lastAck = rs[i].seq;
+    time_ = rs[i].time;
     return true;
   }
   return false;                                  // the query or its answer was lost

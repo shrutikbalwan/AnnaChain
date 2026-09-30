@@ -79,7 +79,7 @@ struct NodeRig {
 // Where the simulated trip starts. By default it ends at the moment the capture
 // is made, because the server refuses readings older than a node could have
 // held them (backend/checks.py, check 5). --start pins it for a reproducible run.
-static uint32_t tripStart(long explicitStart, int readings) {
+static uint32_t tripStart(long long explicitStart, int readings) {
   if (explicitStart > 0) return (uint32_t)explicitStart;
   uint32_t now = (uint32_t)time(nullptr);
   uint32_t start = now - (uint32_t)readings * 300u;
@@ -90,11 +90,11 @@ int main(int argc, char** argv) {
   int online = 300, dark = 120;
   double drift = 6.5;                 // how far node B ends up off, in degrees
   bool ethylene = false;
-  long start = 0;
+  long long start = 0;   // not long: 32 bits on Windows, full in Jan 2038
   int pos = 0;
   for (int i = 1; i < argc; ++i) {
     if (!strcmp(argv[i], "--ethylene")) ethylene = true;
-    else if (!strcmp(argv[i], "--start") && i + 1 < argc) start = atol(argv[++i]);
+    else if (!strcmp(argv[i], "--start") && i + 1 < argc) start = atoll(argv[++i]);
     else if (pos == 0) { online = atoi(argv[i]); pos++; }
     else if (pos == 1) { dark   = atoi(argv[i]); pos++; }
     else if (pos == 2) { drift  = atof(argv[i]); pos++; }

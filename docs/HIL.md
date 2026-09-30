@@ -14,6 +14,10 @@ their parts. Everything below is a procedure for finding out, not a description
 of something that works. When a step passes, paste its real output under it,
 with the date, and change nothing else.
 
+Power (the deck's 36 µA and 3.8 years) is not a step here: it needs hardware
+a DevKitC is not, and firmware that sleeps. [`POWER.md`](POWER.md) has the
+model, the measurement and what would falsify it.
+
 Irreversible actions (locking an ATECC608, erasing NVS, burning eFuses) are not
 in this file. They are in [`BRINGUP.md`](BRINGUP.md), which also has the smoke
 test's output format, the SX1262 troubleshooting table and the pin-check
@@ -44,11 +48,15 @@ procedure.
   second one fails with *Access is denied* / *could not open port*.
 - **Start from a clean server database for every step that talks to the
   server** (`mingw32-make clean`, or delete `backend/annachain.db*` and
-  `backend/ledger.jsonl`). The laptop demos (`dump`, `fleet`) enrol device
-  `26232001` (decimal 639836161) with a published dev key. The board uses the
-  same device id with a key it generated itself. On a database that has seen a
-  demo, the board's enrolment is refused with **409** and every record it sends
-  is refused as `bad signature`.
+  `backend/ledger.jsonl`). The laptop demos (`dump`, `fleet`, the seed
+  capture) enrol devices `26232001`–`26232003` with published dev keys. The
+  board is **`26232101`** (decimal **639836417**; `AC_DEVICE_ID` in
+  `src/main.cpp`, `-DAC_DEVICE_ID=0x26232102` for a second board), so a demo
+  and the board no longer collide. Until 1 Oct 2026 the board was `26232001`
+  too: on a database that had seen a demo its enrolment was refused (409) and
+  every record failed `bad signature`. A database left over from an earlier
+  flash of the same board still does that (the new flash made a new key);
+  the server now says so beside the reason (step 1, failure 3).
 - The server must listen on the network for anything that is not on the
   laptop's own USB port: `python -m uvicorn backend.app:app --host 0.0.0.0 --port 8000`.
 
@@ -64,6 +72,9 @@ Parts you have not got yet are fine: their line says FAIL, which is the point.
 pio run -e smoke -t upload
 pio device monitor -b 115200            # Windows: add -p COM<n>
 ```
+
+The output appears only on the USB-C socket labelled **UART**, not the one
+labelled **USB** (upload works through either; see *Before any step*).
 
 **Expected output, in full** (angle brackets are values that differ per part;
 everything else is literal). The format is specified in
@@ -135,11 +146,11 @@ database).
 ```
 bridging COM<n> <-> http://127.0.0.1:8000
 
-# AnnaChain node 26232001
+# AnnaChain node 26232101
 # flash ring 4096 records, holding 0, last seq 0, server has 0
 # sensors: MOCK (no parts needed)
 # link: USB serial
-registered 26232001, server has 0
+registered 26232101, server has 0
 # press BOOT to drop the link, press again to restore it
 # type 'wipe' to clear the flash and start a fresh run
   +  1  ack 1
@@ -148,32 +159,107 @@ registered 26232001, server has 0
 #     2    4.<nn> C  <nn>.<nn> %  batt 100  sent  waiting 0
 ```
 
-(The `K 639836161 <64 hex>` line the node prints is consumed by the bridge, not
-echoed: it is what produces `registered 26232001`.)
+(The `K 639836417 <64 hex>` line the node prints is consumed by the bridge, not
+echoed: it is what produces `registered 26232101`.)
 
-**Passes when** the dashboard shows device `26232001` with a line near 4 °C
+**The tamper jumper, from step 2 on.** Fit a jumper wire from **GPIO4 to GND**
+(header J1 pin 4 to any GND pin) before flashing `node` or `node_lora`. GPIO4 is
+the tamper reed loop with its internal pull-up on: a shut lid pulls it LOW
+(sealed); HIGH means the loop is open, and every record carries `FLAG_TAMPER`
+and raises a *tamper* alert. A bare board has an open loop, so without the
+jumper it reports a broken seal on every reading, which is correct: nothing is
+holding it shut. The sense is not inverted to make the bench quiet, because an
+inverted loop reads a cut or unplugged wire as sealed (fail-open), which
+defeats the sensor (`lib/ac/ac_pins.h`). `node_mock` (this step) does not read
+the pin, so it needs no jumper. Take the jumper off to demonstrate tamper.
+
+**Passes when** the dashboard shows device `26232101` with a line near 4 °C
 growing by one point every 5 s, status **live**. Then press BOOT: the node prints
 `# LINK DOWN — still logging`, the dashboard goes **silent**; press it again and
 the held records arrive in one batch (`+ <n>`), drawn late in orange.
 
 **How it goes wrong**
 
-1. **Every record refused: `timestamp went backwards`**, after the board was
-   reset or re-flashed. The node's clock is `kClockBase` (25 Sep 2026 00:00 UTC)
-   plus seconds since boot; nothing sets it from the server. A reset restarts
-   the clock, so the next record is earlier than the last one the server
-   accepted, and check 5 refuses it — and every one after it. Clear the server
-   database *and* type `wipe` on the node, or keep the board powered for the
-   whole demo.
-2. **Every record refused: `timestamp older than a node can hold a reading`**
-   from **25 October 2026** onward. That is `kClockBase` + 30 days
-   (`checks.MAX_HOLD_S`). After that date a USB node with no time source cannot
-   deliver a single record. See the report accompanying this file; it is not
-   fixed here.
-3. **`enrolment refused (409)`** then `bad signature` on everything: the database
-   already holds device 26232001 with another key (a demo capture, or an earlier
-   flash whose NVS key was erased). Clean the database. Nothing prints at all:
-   wrong USB socket (use **UART**), or the monitor still holds the port.
+1. **The first records show "relative to power-up, not wall clock"** on the
+   dashboard. Expected, not a fault: they were taken before the bridge's first
+   `A <seq> <time>` reached the node (see *The node's clock* below). Every
+   record after that is wall-clock time. If *every* record is flagged, the
+   bridge is older than the time field (`A <seq>` with no time): update
+   `backend/bridge_serial.py`.
+2. **`inconsistent: this device's clock has already been set`**: a board whose
+   flash was wiped (or a second board with the same id) sent a flagged record to
+   a database that has seen this device's wall-clock records. Clean the
+   database, as for failure 3.
+3. **`enrolment refused (409)`** then `refused: bad signature` on everything,
+   with the bridge adding *device 26232101 is enrolled with a different key…
+   run `make clean` … or rotate the key*, and the dashboard's refusal showing
+   *this record does not verify under the key enrolled for device 26232101 …
+   the typical symptom of a database that enrolled this id with a different
+   key*. The database holds this id with another key: an earlier flash whose
+   NVS key was erased, or a board built with a demo id. `mingw32-make clean`
+   and restart the server, or have an admin rotate the key
+   (`POST /api/register` with `rotate: true`). Check 2 still refuses the
+   records until then; the hint only says why.
+4. **Nothing prints at all**: wrong USB socket (use **UART**), or the monitor
+   still holds the port.
+
+### The node's clock (P1, 1 Oct 2026)
+
+Until 1 Oct 2026 the node's clock was a hand-typed date (`kClockBase`, 25 Sep
+2026) plus uptime, and nothing ever set it. Every record from a board that had
+not been re-flashed was refused from 25 Oct 2026 (check 5, 30 days), and any
+reset sent time backwards. What happens now, and why:
+
+- **Where it starts.** `kClockBase` is the build time (`__DATE__`/`__TIME__`,
+  minus 14 h because those are the build machine's local time with no zone),
+  or `-DAC_CLOCK_BASE=<unix>`. Never ahead of true UTC, at most 26 h behind.
+- **Where the time comes from.** The server's clock rides on the answer the
+  node already asks for on every resync: `/api/lastack` returns `now`; the
+  serial bridge answers `Q <dev>` with `A <seq> <now>` (a board that predates
+  the field reads `<seq>` and ignores the rest); the gateway puts it in its
+  `FRAME_LASTACK` answer (the server's time, or its own once NTP has synced).
+  The node sets its clock from it every time it arrives, not only the first.
+- **Before that, the flag.** Records taken before the first answer carry
+  `FLAG_TIMEUNSET` (bit 7): their timestamp is uptime from `kClockBase`. The
+  server accepts them without the 30-day age rule and the dashboard and buyer's
+  page say *timestamp is relative to power-up, not wall clock*. Once the node
+  has stamped one record with a set clock, it never flags again; once the
+  server has accepted one unflagged record from a device, it refuses a flagged
+  one from it as inconsistent, and remembers that across restarts
+  (`devices.clock_set`).
+- **A reboot never goes backwards.** At boot the node reads the newest record
+  in its flash and resumes its clock from that record's timestamp, and no
+  record is ever stamped earlier than the one before it (a server time slightly
+  behind a fast crystal holds the clock still rather than stepping back).
+  **Persistence interval: every record, at zero extra cost.** The timestamp is
+  already written to flash in each record before the record can leave the node,
+  in the same LittleFS write, and LittleFS commits a file write atomically. So
+  the persisted value is exactly the last issued timestamp (margin 0: nothing
+  that left the node can be later than the newest record in flash), and there
+  is no second copy to wear flash or disagree. A separate NVS key would be a
+  second write per sample (about 105,000 a year at 5 minutes, which NVS's wear
+  levelling could take) to store a value the log already holds; it was not
+  added.
+- **A reboot after the clock was set, before the server is reached again**:
+  the records are not flagged (the node has already claimed wall-clock time,
+  and flagging again is what the server's consistency rule forbids), and their
+  timestamps are a lower bound: late by however long the board was without
+  power. The first record after power-up carries `FLAG_SELFTEST`, which marks
+  where that starts; the next server answer corrects the clock, forward only.
+- **Monotonic across the switch.** The server compares flagged timestamps with
+  each other and wall-clock timestamps with each other. The first wall-clock
+  record is not compared with the flagged ones before it: they are two
+  different clocks, and the node takes the server's time as it finds it.
+- **Not authenticated.** The time is not signed. Whatever carries it (the
+  bridge, the gateway, the network) can shift it, bounded by the node never
+  stepping backwards and by check 5 (60 s ahead, 30 days behind). A signed time
+  from the server is future work (docs/CRYPTO.md).
+- **Uptime** is read from `esp_timer` (64-bit), not `millis()`, which is 32-bit
+  and wraps after 49.7 days of uptime.
+
+UNPROVEN on a board, like the rest of this file: the simulated gate
+(`backend/tests/test_clock_gate.py`, a board flashed today run for 36 days with
+a reboot at 32.5) passes; step 1 above is where it is checked for real.
 
 ---
 
@@ -193,11 +279,11 @@ python backend/bridge_serial.py COM<n>
 ```
 bridging COM<n> <-> http://127.0.0.1:8000
 
-# AnnaChain node 26232001
+# AnnaChain node 26232101
 # flash ring 4096 records, holding <n>, last seq <n>, server has <n>
 # sensors: SHT40 on I2C
 # link: USB serial
-registered 26232001, server has 0
+registered 26232101, server has 0
 # press BOOT to drop the link, press again to restore it
 # type 'wipe' to clear the flash and start a fresh run
   +  1  ack 1
@@ -220,12 +306,13 @@ dashboard line follows. Ice water in a sealed bag does the same thing downwards.
 2. **`Enclosure opened in transit` (tamper) alert on the first record.** The
    tamper input is GPIO4 with the internal pull-up, and it reads *open* unless the
    reed loop pulls it to GND. On a bench with no reed switch, tie GPIO4 to GND
-   with a jumper, or every record carries `FLAG_TAMPER`.
-3. **Battery shows 100 % no matter what.** With no divider on GPIO5, or a cell
-   below 3.3 V, the percentage in `Sht40Sensors::read()` is computed in unsigned
-   arithmetic and wraps round to a large number, which is then clamped to 100.
-   A flat cell reads full. See the report accompanying this file; it is not
-   fixed here.
+   with a jumper, or every record carries `FLAG_TAMPER` (step 1, *The tamper
+   jumper*, says why the sense is not inverted instead).
+3. **Battery shows 0 %** with no divider on GPIO5: nothing is on the ADC, and
+   0 % (with a *battery* alert) is the honest reading. Fit the 2:1 divider.
+   Until 1 Oct 2026 this read 100 %: the conversion was unsigned and a cell
+   below 3.3 V wrapped round to full. It is now `batteryPercent()` in
+   `lib/ac/ac_batt.h`, tested in selftest (3.0 V reads 0 %, 3.75 V 50 %).
 
 ---
 
@@ -244,16 +331,16 @@ pio device monitor -b 115200
 
 ```
 
-# AnnaChain node 26232001
+# AnnaChain node 26232101
 # flash ring 4096 records, holding <n>, last seq <n>, server has <n>
 # sensors: SHT40 on I2C
 # link: SX1262 LoRa <up|NOT READY> (UNPROVEN driver)
 # NFC: PN532 ready (UNPROVEN driver)
-K 639836161 <64 hex>
+K 639836417 <64 hex>
 # press BOOT to drop the link, press again to restore it
 # type 'wipe' to clear the flash and start a fresh run
-T 639836161 assign <uid hex> <unix time>
-T 639836161 tap <uid hex> <unix time>
+T 639836417 assign <uid hex> <unix time>
+T 639836417 tap <uid hex> <unix time>
 ```
 
 (If no SX1262 is fitted there is also a `# SX1262 begin failed, RadioLib code
@@ -350,7 +437,7 @@ The node's `K <device> <key>` line appears on the **node's** serial port, which
 the bridge is not reading, so enrol the node by hand once (operator login):
 
 ```
-python -c "import json,urllib.request as u;B='http://127.0.0.1:8000';p=lambda path,b,h={}:json.load(u.urlopen(u.Request(B+path,json.dumps(b).encode(),{'Content-Type':'application/json',**h})));t=p('/api/login',{'username':'operator','password':'annachain'})['token'];print(p('/api/register',{'device':639836161,'key_hex':'<64 hex from the K line>'},{'Authorization':'Bearer '+t}))"
+python -c "import json,urllib.request as u;B='http://127.0.0.1:8000';p=lambda path,b,h={}:json.load(u.urlopen(u.Request(B+path,json.dumps(b).encode(),{'Content-Type':'application/json',**h})));t=p('/api/login',{'username':'operator','password':'annachain'})['token'];print(p('/api/register',{'device':639836417,'key_hex':'<64 hex from the K line>'},{'Authorization':'Bearer '+t}))"
 ```
 
 **Expected output** of the bridge on the gateway's port:
@@ -359,7 +446,7 @@ python -c "import json,urllib.request as u;B='http://127.0.0.1:8000';p=lambda pa
 bridging COM<gateway> <-> http://127.0.0.1:8000
 
 # AnnaChain gateway AA000001
-# uplink: USB serial  ·  clock: compiled-in date (not synced)
+# uplink: USB serial  ·  clock: build time + uptime (not synced)
 # LoRa: SX1262 up (UNPROVEN driver)
 # buffer 4000 frames · holding 0 · dropped 0 records, 0 gap notices
 # gap notices: heard 0 · forwarded 0
@@ -381,12 +468,30 @@ With the USB uplink the gateway answers it by asking `bridge_serial.py` (a `Q`
 line), so with the bridge stopped the node gets "no value" and carries on from
 what it last knew — that is the designed behaviour, not a fault.
 
-**Before this counts, time it on air.** By the Semtech time-on-air formula a
-record frame (86-byte payload: magic, kind, 84-byte record) at SF9, 125 kHz,
-CR 4/7, 8-symbol preamble, explicit header, CRC on is about **0.66 s**, and the
-gateway's 10-byte ACK about 0.17 s. That is arithmetic, not a measurement; check
-it against the power and duty-cycle limits you are working to before a long
-run.
+**Before this counts, time it on air.** These are CALCULATED
+(`python tools/airtime.py`, the Semtech time-on-air formula at SF9, 125 kHz,
+CR 4/7, 8-symbol preamble, explicit header, CRC on), never measured:
+
+| Frame | Payload | Time on air (calculated) |
+|---|---|---|
+| record, node to gateway | 86 B | 0.66 s |
+| query, node to gateway (every sample since S9) | 6 B | 0.14 s |
+| last-ACK + time, gateway to node (every sample since S9) | 15 B | 0.20 s |
+| ACK, gateway to node | 10 B | 0.17 s |
+
+Per 5-minute sample that is 0.80 s from the node and 0.37 s from the gateway
+per node, with no retries (each frame can be tried 3 times). With two radios
+and S9's extra round trip, recheck the duty-cycle answer against the limits you
+work to; it is no longer "one 0.66 s frame per sample".
+
+**Measure it.** With both boards running, put a second receiver or an SDR (an
+RTL-SDR with a waterfall is enough) on 865.0625 MHz, or a scope on the
+SX1262's DIO1 or on the module's TX-enable / RF-switch line, and record at
+least ten samples. For each frame type, write down the measured burst length
+next to the calculated one above, the number of retries seen, and the gap
+between query and reply (the gateway's turnaround, which the node spends
+listening). Paste them here with the date. A burst more than 10 % longer than
+calculated means the settings on air are not the ones in `ac_lora.cpp`.
 
 **How it goes wrong**
 
@@ -439,9 +544,10 @@ running and enrolled):
 **Passes when** the banner says `clock: NTP` and the dashboard shows the node's
 records arriving with no USB cable on the gateway's data port.
 
-This syncs the **gateway's** clock only. Records are stamped by the **node**,
-whose clock is still `kClockBase` plus uptime (step 1, failure 1 and 2); NTP on
-the gateway does not change a single record's timestamp.
+Records are stamped by the **node**. The gateway passes the time down in its
+answer to each node's query: the server's time when the server gave one, else
+its own NTP time (step 1, *The node's clock*). A node records the time it was
+given; it never stamps a record earlier than the one before.
 
 **How it goes wrong**
 
@@ -453,6 +559,6 @@ the gateway does not change a single record's timestamp.
    `--host 0.0.0.0`), Windows Firewall blocking inbound port 8000 on a Public
    network profile, or `AC_SERVER_URL` pointing at 127.0.0.1 (that is the
    gateway itself).
-3. **`clock: compiled-in date (not synced)`**, with `# NTP did not answer`. The
+3. **`clock: build time + uptime (not synced)`**, with `# NTP did not answer`. The
    network blocks UDP 123 (common on venue and campus Wi-Fi). The gateway retries
    every 30 s; a phone hotspot usually allows it.
