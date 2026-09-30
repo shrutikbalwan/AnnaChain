@@ -464,12 +464,30 @@ With the USB uplink the gateway answers it by asking `bridge_serial.py` (a `Q`
 line), so with the bridge stopped the node gets "no value" and carries on from
 what it last knew — that is the designed behaviour, not a fault.
 
-**Before this counts, time it on air.** By the Semtech time-on-air formula a
-record frame (86-byte payload: magic, kind, 84-byte record) at SF9, 125 kHz,
-CR 4/7, 8-symbol preamble, explicit header, CRC on is about **0.66 s**, and the
-gateway's 10-byte ACK about 0.17 s. That is arithmetic, not a measurement; check
-it against the power and duty-cycle limits you are working to before a long
-run.
+**Before this counts, time it on air.** These are CALCULATED
+(`python tools/airtime.py`, the Semtech time-on-air formula at SF9, 125 kHz,
+CR 4/7, 8-symbol preamble, explicit header, CRC on), never measured:
+
+| Frame | Payload | Time on air (calculated) |
+|---|---|---|
+| record, node to gateway | 86 B | 0.66 s |
+| query, node to gateway (every sample since S9) | 6 B | 0.14 s |
+| last-ACK + time, gateway to node (every sample since S9) | 15 B | 0.20 s |
+| ACK, gateway to node | 10 B | 0.17 s |
+
+Per 5-minute sample that is 0.80 s from the node and 0.37 s from the gateway
+per node, with no retries (each frame can be tried 3 times). With two radios
+and S9's extra round trip, recheck the duty-cycle answer against the limits you
+work to; it is no longer "one 0.66 s frame per sample".
+
+**Measure it.** With both boards running, put a second receiver or an SDR (an
+RTL-SDR with a waterfall is enough) on 865.0625 MHz, or a scope on the
+SX1262's DIO1 or on the module's TX-enable / RF-switch line, and record at
+least ten samples. For each frame type, write down the measured burst length
+next to the calculated one above, the number of retries seen, and the gap
+between query and reply (the gateway's turnaround, which the node spends
+listening). Paste them here with the date. A burst more than 10 % longer than
+calculated means the settings on air are not the ones in `ac_lora.cpp`.
 
 **How it goes wrong**
 

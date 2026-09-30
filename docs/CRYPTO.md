@@ -121,8 +121,9 @@ What has to change, and nothing here has been changed:
 - **Gap notices**: signed by the same ECDSA key; the notice frame grows.
 - **LoRa** (`ac_lora.*`): a v2 record frame is 2 + 117 = 119 bytes. By the
   Semtech formula at SF9/125 kHz/CR 4/7 that is about **0.86 s** on air
-  against about 0.66 s for v1 — **about 31 % more airtime per record**, before
-  any retry. Recheck the duty cycle against the limits you work to.
+  against about 0.66 s for v1 (both CALCULATED, `tools/airtime.py`; never
+  measured, docs/HIL.md step 5) — **about 31 % more airtime per record**,
+  before any retry. Recheck the duty cycle against the limits you work to.
 - **Gateway** (`ac_gateway.*`): a new frame kind, and buffer slots sized for
   the larger frame (fewer frames in the same RAM).
 - **Buyer's page** (`trace.html`): parse by length/version and verify ECDSA
