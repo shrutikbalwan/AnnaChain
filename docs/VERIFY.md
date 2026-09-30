@@ -92,14 +92,15 @@ g++ -std=c++17 -Wall -DAC_LOG_CAPACITY=4096 -Ilib/ac $CORE tools/selftest.cpp -o
 ./selftest
 ```
 
-**Expected:** `92 checks, 0 failed` and `ALL GOOD`. (70 originally; 8 were
-added for the signed gap notice and the clock base, and 14 for gap notices
-crossing the truck gateway.)
+**Expected:** `96 checks, 0 failed` and `ALL GOOD`. (70 originally; 8 were
+added for the signed gap notice and the clock base, 14 for gap notices
+crossing the truck gateway, and 4 for the frozen v1 record format.)
 
 Read the section names as they scroll. They must include, and all pass:
 
 - SHA-256 against the published vectors *(if this fails, nothing else means anything)*
 - Record encoding — including a sub-zero temperature surviving as signed
+- The v1 record format is frozen, and has no version byte
 - Store first, transmit second — **C1**
 - 29 hours dark, then catch up — **C2**
 - The link dies in the middle of the catch-up
@@ -114,7 +115,7 @@ Read the section names as they scroll. They must include, and all pass:
   **"The gateway cannot alter a gap notice"** and **"A gap notice lost to gateway
   overrun is counted"**, ending with **"The gateway cannot make a record up"** — **C4**, **C6**
 
-**FAIL if:** the count is below 92, anything is red, or a section above is missing.
+**FAIL if:** the count is below 96, anything is red, or a section above is missing.
 
 Then the server's own suite:
 
@@ -123,7 +124,7 @@ python3 -m pip install -r backend/requirements-dev.txt
 python3 -m pytest backend/tests -q
 ```
 
-**Expected:** every test passes (124 at the time of writing; the browser
+**Expected:** every test passes (129 at the time of writing; the browser
 tests skip on a machine without Chrome or Playwright, and the gateway
 end-to-end test skips without a C++ compiler). **FAIL if** any test
 fails, or `backend/tests/` is missing.
@@ -440,7 +441,7 @@ gateway.
 | Component | Pass / Fail | Evidence |
 |---|---|---|
 | Build, no warnings | | |
-| 78 firmware tests | | |
+| 96 firmware checks | | |
 | Backend test suite | | |
 | C1 store before transmit | | |
 | C2 outage recovery | | |

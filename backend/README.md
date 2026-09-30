@@ -251,8 +251,16 @@ accurate.
   Fabric adds and why it is in the design.
 - **SQLite, not PostgreSQL + TimescaleDB.** The schema is written for the move
   and `records` is the hypertable candidate, but the finale build is not done.
-- **Signatures are HMAC.** Symmetric, so the server holds the same key. That is
-  the weakness the ATECC608B removes. Two things follow from it today:
+- **Signatures are HMAC — a scope decision, not an oversight** (see
+  [`docs/CRYPTO.md`](../docs/CRYPTO.md), decided 30 Sep 2026: "driver now,
+  format later"). The ATECC608B is on the BOM and its driver
+  (`lib/ac/ac_atecc.*`, `IEcdsaSigner`) exists, but a P-256 signature is 64
+  bytes and a v1 record has 32, so ECDSA is a record-format change, specified
+  there and not built. Records are format v1: 84 bytes, no version byte,
+  identified by length; any later format starts with a version byte, and the
+  server refuses a format it does not know by name. HMAC is symmetric, so the
+  server holds the same key. That is the weakness the ATECC608B removes. Two
+  things follow from it today:
   - **A buyer cannot check a signature.** The trace page re-derives the hash
     chain on the phone, but the signature check happens on our server, so the
     buyer is trusting us for that part. The page says so.

@@ -301,7 +301,7 @@ register; if you want it, that is a one-line addition, not something to assume.
 
 This step proves the chip. It does **not** make records ECDSA-signed: records
 still carry a 32-byte HMAC, and an ECDSA signature is 64 bytes. That is a record
-format change, planned separately (`IEcdsaSigner` in `lib/ac/ac_hal.h`).
+format change, decided against for now and specified in [`CRYPTO.md`](CRYPTO.md).
 
 **How it goes wrong**
 

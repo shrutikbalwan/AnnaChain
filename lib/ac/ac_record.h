@@ -24,6 +24,17 @@ namespace ac {
 constexpr size_t kBodyBytes = 52;
 constexpr size_t kRecBytes  = 84;
 
+// The format version (docs/CRYPTO.md). The layout above is v1, and it has no
+// version byte: every node, capture and database already holds these 84 bytes
+// as evidence, so v1 is identified by its LENGTH, never by its first byte (the
+// low byte of the device id, which can be anything). Every later format starts
+// with a version byte of 2 or more, covered by its signature, and has a fixed
+// length of its own that is never 84. Nothing here produces a later format.
+constexpr uint8_t kFormatV1 = 1;
+
+// The format of `len` bytes: kFormatV1, or 0 for a format this code does not know.
+uint8_t recordFormat(const uint8_t* raw, size_t len);
+
 enum Flags : uint8_t {
   FLAG_TAMPER   = 1 << 0,  // enclosure opened
   FLAG_MOVED    = 1 << 1,  // accelerometer above threshold

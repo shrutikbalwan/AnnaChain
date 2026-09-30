@@ -267,9 +267,9 @@ def ingest(body: Ingest):
             rejected += 1
             first_reason = first_reason or "not a record"
             continue
-        if len(raw) != checks.REC:
+        if checks.record_format(raw) != checks.FORMAT_V1:
             rejected += 1
-            first_reason = first_reason or f"wrong length ({len(raw)} bytes)"
+            first_reason = first_reason or checks.format_refusal(raw)
             continue
 
         r = checks.parse(raw)

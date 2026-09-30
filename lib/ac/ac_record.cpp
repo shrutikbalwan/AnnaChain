@@ -21,6 +21,11 @@ static inline uint16_t get16(const uint8_t*& p) {
   uint16_t v = (uint16_t)(p[0] | (uint16_t)p[1] << 8); p += 2; return v;
 }
 
+uint8_t recordFormat(const uint8_t* raw, size_t len) {
+  (void)raw;                 // v1 carries no version byte; its length is its version
+  return len == kRecBytes ? kFormatV1 : 0;
+}
+
 void encodeBody(const Record& r, uint8_t out[kBodyBytes]) {
   uint8_t* p = out;
   put32(p, r.device);

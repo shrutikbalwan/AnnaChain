@@ -13,6 +13,36 @@ import hashlib, hmac, struct, time
 REC = 84
 BODY = 52
 
+# ── the format version (docs/CRYPTO.md) ────────────────────────────────────
+# v1 is the 84-byte record above. It has no version byte, and never will: its
+# bytes are the evidence, and every node, capture and database already holds
+# them. It is identified by its LENGTH, never by its first byte (which is the
+# low byte of the device id, and can be anything).
+#
+# Every later format starts with a version byte, 2 or more, covered by the
+# signature, and has a fixed length of its own that is never 84. This server
+# knows only v1; anything else is refused by name.
+FORMAT_V1 = 1
+FORMATS = {FORMAT_V1: REC}      # version -> its fixed length
+
+
+def record_format(raw: bytes):
+    """The format version of a record, or None if it is not one we know."""
+    if len(raw) == REC:
+        return FORMAT_V1
+    if raw and raw[0] >= 2 and FORMATS.get(raw[0]) == len(raw):
+        return raw[0]
+    return None
+
+
+def format_refusal(raw: bytes) -> str:
+    """Why record_format() said None, in words a log reader can act on."""
+    if not raw:
+        return "empty record"
+    return (f"not a record in any format this server knows: {len(raw)} bytes, "
+            f"record format version {raw[0]} by its first byte (v1 is exactly "
+            f"{REC} bytes with no version byte; see docs/CRYPTO.md)")
+
 # Check 5. A record's time has to be possible for the device that sent it.
 MAX_SKEW_S = 60                 # ahead of the server by more than this is a wrong clock
 MAX_HOLD_S = 30 * 86400         # older than a node (14 days of flash) plus a gateway

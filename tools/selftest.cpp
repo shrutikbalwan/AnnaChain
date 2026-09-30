@@ -72,6 +72,40 @@ static void test_record() {
   CHECK(b.temp == -1875 && b.tempC() < -18.0, "-18.75 C reads back as -18.75 C");
 }
 
+// ── 2b. the v1 layout is frozen, and told apart by its length ────────────
+// docs/CRYPTO.md. The same record, as bytes, is in
+// backend/tests/test_record_format.py: if either side's encoder changes, one of
+// the two suites goes red.
+static void test_record_format() {
+  head("The v1 record format is frozen, and has no version byte");
+  static const char* golden =
+      "012023260700000080b9b56aadf8a3232f00093f00070e151c232a31383f464d545b"
+      "626970777e858c939aa1a8afb6bdc4cbd2d99b3d31af2a558f4021ac074f5f111202"
+      "114de7378ea36521c4f47f3e7dc97f32";
+  Record a;
+  a.device = 0x26232001; a.seq = 7; a.ts = 1790294400u;
+  a.temp = -1875; a.rh = 9123; a.c2h4 = 47; a.flags = FLAG_TAMPER | FLAG_COLD;
+  a.batt = 63;
+  for (int i = 0; i < 32; ++i) a.prev[i] = (uint8_t)(i * 7);
+  SoftSigner s("annachain-test-key-node-a-000000");
+  uint8_t d[32]; digest(a, d); s.sign(d, a.sig);
+  uint8_t raw[kRecBytes]; encode(a, raw);
+  std::string hex;
+  for (size_t i = 0; i < kRecBytes; ++i) {
+    char b[3]; std::snprintf(b, sizeof b, "%02x", raw[i]); hex += b;
+  }
+  CHECK(hex == golden, "a v1 record is byte for byte the one the server's tests hold");
+  CHECK(recordFormat(raw, kRecBytes) == kFormatV1, "84 bytes is v1, with no version byte");
+
+  a.device = 0x26232002;                    // node B: its first byte is 0x02
+  encode(a, raw);
+  CHECK(raw[0] == 2 && recordFormat(raw, kRecBytes) == kFormatV1,
+        "a v1 record whose first byte is 2 is still v1: length decides, not byte 0");
+
+  uint8_t v2[117] = {2};
+  CHECK(recordFormat(v2, sizeof v2) == 0, "a later format is not mistaken for v1");
+}
+
 // ── a small rig, so each test starts clean ────────────────────────────────
 struct Rig {
   SimClock   clk{1758758400u};
@@ -556,6 +590,7 @@ int main() {
   std::printf("\n\033[1mAnnaChain self-tests\033[0m\n");
   test_sha256();
   test_record();
+  test_record_format();
   test_store_first();
   test_outage_gap_fill();
   test_link_dies_mid_catchup();
