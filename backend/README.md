@@ -33,7 +33,18 @@ on every record, not by a password. A node has no password to lose.
 `backend/annachain.db*` and `backend/ledger.jsonl`). A database left over from
 testing shows the judges whatever was done to it.
 
-Now give it a trip. In a second terminal, first build the capture generator
+**The one-command version** is `mingw32-make demo-full` (clean, build, capture,
+serve, feed; the server stays up until Ctrl+C). If the compiler misbehaves on
+the venue laptop, `mingw32-make demo-seed` needs none: it feeds the committed
+capture `tools/seed/fleet.seed.capture`, **re-timed at seed time** to end now
+and re-signed with its own published dev keys (the byte-for-byte equivalent of
+a fresh `fleet 300 120` run, checked by `backend/tests/test_feed_sim.py`), at
+full speed, into a clean database: three shipments, 420 records each, node B
+suspect. Re-timing is honest only because those keys are public development
+keys; it could not be done to a real device's records. Both refuse to start if
+something already listens on port 8000.
+
+The long way, step by step: in a second terminal, first build the capture generator
 (same compiler you already used), and make the capture right before you replay
 it — the trip ends at the moment it is captured, and the server refuses
 readings older than a node could have held them:

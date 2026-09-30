@@ -38,11 +38,29 @@ fleet: $(CORE) tools/fleet.cpp
 serve:
 	$(PY) -m uvicorn backend.app:app --host 0.0.0.0 --port 8000
 
+# One command, clean clone to a dashboard with a trip in it: clean, build and
+# capture (the fleet target), then serve and feed (tools/demo_full.py). The
+# server keeps running until Ctrl+C. ARGS goes to demo_full.py, e.g.
+#   mingw32-make demo-full ARGS="--rate 200 --silence 20"
+demo-full: clean fleet
+	$(PY) tools/demo_full.py fleet.capture $(ARGS)
+
+# The fallback when live generation misbehaves on the venue laptop: no
+# compiler. A committed capture would be refused 30 days after it was made
+# (check 5), so tools/seed/fleet.seed.capture is RE-TIMED at seed time to end
+# now, and re-chained and re-signed with its own published dev keys. That is
+# byte for byte what `fleet 300 120 --start <now>` would print (a test checks
+# it), and it is only possible because those keys are public dev keys. It is not
+# fed with --allow-stale, which would only get every record refused.
+demo-seed: clean
+	$(PY) tools/demo_full.py --seed $(ARGS)
+
 # Run this before every demo. A database left over from testing carries
 # whatever was done to it: re-keyed devices, declared gaps, test nodes.
 clean:
 	rm -f demo selftest dump fleet *.exe *.capture records.jsonl \
 	      backend/annachain.db backend/annachain.db-wal backend/annachain.db-shm \
+	      seed.capture \
 	      backend/ledger.jsonl
 
-.PHONY: all demo test firmware-test backend-test capture fleet serve clean
+.PHONY: all demo test firmware-test backend-test capture fleet serve demo-full demo-seed clean

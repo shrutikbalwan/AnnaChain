@@ -113,3 +113,54 @@ def test_thirty_percent_of_the_window_feeds_with_a_warning(client, run, tmp_path
     assert stored(client) == 10
     err = capsys.readouterr().err
     assert "days old" in err and "regenerate" in err
+
+
+# ── the --seed fallback (tools/demo_full.py) ────────────────────────────────
+# A capture committed to the repository goes stale 30 days after it is made.
+# The seed path re-times it to end now and re-signs it with its own published
+# dev keys; these check that the result is a known-good database, and that
+# re-timing is byte for byte what regenerating with tools/fleet.cpp would give.
+import importlib.util  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[2]
+SEED = ROOT / "tools" / "seed" / "fleet.seed.capture"
+
+
+def demo_full():
+    spec = importlib.util.spec_from_file_location("demo_full", ROOT / "tools" / "demo_full.py")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def test_the_seed_builds_a_known_good_database(client, auth, run, tmp_path, capsys):
+    lines = SEED.read_text(encoding="utf-8").splitlines()
+    p = tmp_path / "seed.capture"
+    p.write_text("\n".join(demo_full().retime(lines)) + "\n", encoding="utf-8")
+    run(str(p), "--rate", "100000", "--silence", "0")
+    assert "days old" not in capsys.readouterr().err          # fresh once re-timed
+    ships = client.get("/api/shipments", headers=auth).json()["shipments"]
+    assert len(ships) == 3 and all(s["records"] == 420 for s in ships)
+    assert [s["device"] for s in ships if s["suspect"]] == [0x26232002]   # node B
+    for s in ships:
+        v = client.get(f"/api/verify/{s['device']}?full=true").json()
+        assert v["ok"] is True and v["records"] == 420
+
+
+def test_retiming_the_seed_equals_regenerating_it(tmp_path):
+    cxx = shutil.which("g++") or shutil.which("clang++")
+    if not cxx:
+        pytest.skip("no C++ compiler")
+    exe = tmp_path / "fleet"
+    core = ["lib/ac/ac_sha256.cpp", "lib/ac/ac_record.cpp", "lib/ac/ac_node.cpp",
+            "lib/ac/ac_gateway.cpp", "lib/ac/ac_sim.cpp"]
+    subprocess.run([cxx, "-std=gnu++17", "-DAC_LOG_CAPACITY=4096", "-Ilib/ac", *core,
+                    "tools/fleet.cpp", "-o", str(exe)], cwd=ROOT, check=True)
+    start = 1790294400 + 7 * DAY                 # any 5-minute-aligned start
+    fresh = subprocess.run([str(exe), "300", "120", "--start", str(start)], cwd=ROOT,
+                           check=True, capture_output=True, text=True).stdout.splitlines()
+    seed = SEED.read_text(encoding="utf-8").splitlines()
+    assert demo_full().retime(seed, start=start) == fresh

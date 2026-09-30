@@ -3,6 +3,7 @@ demo
 selftest
 dump
 *.capture
+!tools/seed/*.capture
 records.jsonl
 *.exe
 backend/annachain.db*
