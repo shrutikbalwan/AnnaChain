@@ -1,6 +1,23 @@
 # AnnaChain — for when you do not want to install PlatformIO yet.
 CXX ?= g++
-PY  ?= python3
+
+# Which Python. `make PY=...` always wins. Otherwise the first of python3 and
+# python that can import the backend's dependencies and Playwright (the browser
+# tests), then the first that can import the backend's dependencies, then
+# python3. On a Windows laptop `python3` is often a different install from
+# `python` (the Store's 3.14 with nothing in it), and running the suite with it
+# costs twenty minutes of confusion. Worked out only when a target uses $(PY).
+comma := ,
+pyhas = $(shell $(1) -c "import sys,os;sys.stderr=open(os.devnull,'w');import $(2);print(1)")
+pydetect = $(firstword \
+  $(if $(call pyhas,python3,fastapi$(comma)playwright),python3) \
+  $(if $(call pyhas,python,fastapi$(comma)playwright),python) \
+  $(if $(call pyhas,python3,fastapi),python3) \
+  $(if $(call pyhas,python,fastapi),python) \
+  python3)
+ifeq ($(origin PY),undefined)
+PY = $(eval PY := $(pydetect))$(PY)
+endif
 FLAGS = -std=gnu++17 -Wall -O2 -DAC_LOG_CAPACITY=4096 -Ilib/ac
 CORE = lib/ac/ac_sha256.cpp lib/ac/ac_record.cpp lib/ac/ac_node.cpp \
        lib/ac/ac_gateway.cpp lib/ac/ac_sim.cpp
@@ -19,6 +36,7 @@ firmware-test: $(CORE) tools/selftest.cpp
 	./selftest
 
 backend-test:
+	@echo "backend tests with: $(PY)  (override: make PY=python)"
 	$(PY) -m pytest backend/tests -q
 
 # a capture of one node's trip, for the server demo. The trip ends now: the

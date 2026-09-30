@@ -51,6 +51,8 @@ MAX_HOLD_S = 30 * 86400         # older than a node (14 days of flash) plus a ga
 FLAG_TAMPER, FLAG_MOVED, FLAG_CHARGING = 1, 2, 4
 FLAG_COLD, FLAG_SELFTEST, FLAG_SENSORBAD = 8, 16, 32
 FLAG_SIMULATED = 64            # a value was invented by the simulator (ethylene)
+FLAG_TIMEUNSET = 128           # ts is uptime from the build time, not wall clock:
+                               # taken before any server set the node's clock (P1)
 
 ETHYLENE_NOT_FITTED = 0xFFFF
 SENSOR_MIN_C, SENSOR_MAX_C = -40.0, 125.0      # SHT40's own rated range
@@ -72,6 +74,7 @@ def parse(raw: bytes) -> dict:
         "selftest":  bool(flags & FLAG_SELFTEST),
         "sensor_bad": bool(flags & FLAG_SENSORBAD),
         "simulated": bool(flags & FLAG_SIMULATED),
+        "time_unset": bool(flags & FLAG_TIMEUNSET),
         "prev": raw[20:52].hex(),
         "sig":  raw[52:84].hex(),
     }
@@ -119,13 +122,26 @@ class Verifier:
         self.anchor_next = {}  # device -> accept the next record as a fresh anchor
         self.stale_calibration = set()   # devices past their EN 13486 due date
         self.last_ts = {}      # device -> timestamp of the last accepted record
+        self.clock_set = set() # devices that have had a record accepted WITHOUT
+                               # FLAG_TIMEUNSET: their clock has been set, and a
+                               # flagged record from them is inconsistent
 
-    def load(self, device_id, last_ack, tip_hex, anchor_next, last_ts=None):
+    def load(self, device_id, last_ack, tip_hex, anchor_next, last_ts=None,
+             clock_set=None):
         self.ack[device_id] = last_ack or 0
         self.tip[device_id] = bytes.fromhex(tip_hex) if tip_hex else None
         self.anchor_next[device_id] = bool(anchor_next)
         if last_ts:
             self.last_ts[device_id] = last_ts
+        # A caller that does not say (clock_set=None) gets the safe reading: a
+        # device with an accepted timestamp is taken to have a set clock, so
+        # the monotonic rule is never silently dropped by a reload.
+        if clock_set is None:
+            clock_set = bool(last_ts)
+        if clock_set:
+            self.clock_set.add(device_id)
+        else:
+            self.clock_set.discard(device_id)
 
     def note_gap(self, device_id, to_seq):
         """The node told us records are gone. Re-anchor rather than refuse for ever."""
@@ -168,18 +184,38 @@ class Verifier:
         #     have held it; and not earlier than the reading before it. A node
         #     whose clock started a year wrong fails the third rule on its very
         #     first record, which is the point.
+        #
+        #     FLAG_TIMEUNSET: the node had not been told the time when it took
+        #     this reading, so ts is uptime counted from its build time and makes
+        #     no wall-clock claim. The age rule (MAX_HOLD_S) is not applied to
+        #     it; every other rule is. It is bounded: once this device has had a
+        #     record accepted without the flag, its clock has been set, and a
+        #     flagged record after that is refused. Monotonic time is enforced
+        #     within flagged records and within wall-clock records, but the
+        #     first wall-clock record is not compared with the flagged ones
+        #     before it: they are different clocks (docs/HIL.md step 1).
         ts = r["ts"]
-        if not (1600000000 < ts < 2200000000):
+        unset = r["time_unset"]
+        if unset and dev in self.clock_set:
+            return False, r, d, ("inconsistent: this device's clock has already been "
+                                 "set, but this record says it was not (FLAG_TIMEUNSET)")
+        # The lower bound is before this project existed. There is no upper
+        # bound but the format's (uint32, Feb 2106): until 1 Oct 2026 it was
+        # 2,200,000,000, which is 18 Sep 2039, after which every record would
+        # have been "impossible". A future timestamp is refused just below,
+        # by 60 s, which is the rule that matters.
+        if not (1600000000 < ts <= 0xFFFFFFFF):
             return False, r, d, "impossible timestamp"
         if ts > now + MAX_SKEW_S:
             return False, r, d, (f"timestamp ahead of the server clock by "
                                  f"{int(ts - now)} s (allowed {MAX_SKEW_S} s)")
-        if ts < now - MAX_HOLD_S:
+        if not unset and ts < now - MAX_HOLD_S:
             return False, r, d, (f"timestamp older than a node can hold a reading "
                                  f"({int((now - ts) // 86400)} days; allowed "
                                  f"{MAX_HOLD_S // 86400}) \u2014 is the device clock wrong?")
         last = self.last_ts.get(dev)
-        if last is not None and ts < last:
+        same_clock = unset or dev in self.clock_set
+        if last is not None and same_clock and ts < last:
             return False, r, d, (f"timestamp went backwards ({int(last - ts)} s before "
                                  f"the previous reading)")
 
@@ -220,6 +256,8 @@ class Verifier:
         self.ack[dev] = seq
         self.anchor_next[dev] = False
         self.last_ts[dev] = ts
+        if not unset:
+            self.clock_set.add(dev)
         return True, r, d, None
 
 

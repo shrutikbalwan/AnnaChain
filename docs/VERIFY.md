@@ -322,7 +322,7 @@ Reporting them as bugs is a false positive.
 | **No ethylene sensor is read** | The field transmits *not fitted*. The part has not been chosen, on purpose. A capture made with `--ethylene` carries invented values, and every such record says so (`FLAG_SIMULATED`, badged SIMULATED on both pages) |
 | Shelf-life parameters are **not validated** | Literature-typical Q10 values. Every response carries the caveat |
 | The SX1262, PN532, ATECC608B and Wi-Fi/NTP drivers are **UNPROVEN** | Written, compiled for the board (every `pio run` environment builds), never run on a part: none has arrived (`docs/HIL.md`). The gateway and node logic above them is tested in the simulator |
-| The clock starts from a **compiled-in date** | No NTP or RTC yet; the server's timestamp check is what catches a wrong one |
+| The node's clock is **set by the server**, not by an RTC | It starts at the build time; the server's time comes with every last-ACK answer. Records taken before that carry `FLAG_TIMEUNSET` and are shown as *relative to power-up, not wall clock*. The time is not signed (docs/CRYPTO.md) |
 | A calibration **registry** does not exist | The check works; there are no real certificates to put in it yet |
 
 ---

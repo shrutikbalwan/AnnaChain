@@ -8,22 +8,33 @@
 
 #include <Arduino.h>
 #include <LittleFS.h>
+#include <esp_timer.h>
 #include "ac_hal.h"
 
 namespace ac {
 
 // ── clock ─────────────────────────────────────────────────────────────────
-// Until an RTC or an NTP sync is on the board, time runs from a base set at
-// boot. The server checks timestamps for plausibility, so a wrong base shows
-// up as a rejected record rather than a silently wrong history.
+// Uptime counted from a base. The base starts at kClockBase (the build time,
+// ac_hal.h) and the node moves it: set() when the server's time arrives with a
+// last-ACK (Node::resync), atLeast() at boot so a reboot resumes after the last
+// record in flash (Node::begin). Until set() it is not wall-clock time, and the
+// records it stamps carry FLAG_TIMEUNSET.
+//
+// Uptime comes from esp_timer (64-bit microseconds), not millis(): millis() is
+// 32-bit and wraps after 49.7 days, which would throw this clock back 49.7
+// days in the middle of a long trip.
 class ArduinoClock : public IClock {
  public:
   explicit ArduinoClock(uint32_t base) : base_(base) {}
-  uint32_t now() override { return base_ + (uint32_t)(millis() / 1000); }
+  uint32_t now() override { return base_ + uptime(); }
   void sleep(uint32_t ms) override { delay(ms); }
-  void setBase(uint32_t unixSeconds) { base_ = unixSeconds - (uint32_t)(millis()/1000); }
+  bool isSet() const override { return set_; }
+  void set(uint32_t unixSeconds) override { base_ = unixSeconds - uptime(); set_ = true; }
+  void atLeast(uint32_t t) override { if (now() < t) base_ = t - uptime(); }
+  static uint32_t uptime() { return (uint32_t)(esp_timer_get_time() / 1000000LL); }
  private:
   uint32_t base_;
+  bool set_ = false;
 };
 
 // ── the flash log ─────────────────────────────────────────────────────────
@@ -75,16 +86,24 @@ class SerialLink : public ILink {
   explicit SerialLink(Stream& io) : io_(io) {}
   bool up() override { return up_; }
   bool queryLastAck(uint32_t device, uint32_t& lastAck) override;
+  // "A <seq> <unix>" from bridge_serial.py / tools/server.py. An older bridge
+  // answers "A <seq>" alone: no time, and nothing else changes.
+  bool serverTime(uint32_t& unixNow) override {
+    if (!time_) return false;
+    unixNow = time_;
+    return true;
+  }
   bool send(const uint8_t* recs, size_t count, uint32_t& acked) override;
   bool declareGap(uint32_t device, uint32_t from, uint32_t to,
                   const uint8_t mac[32]) override;
   void setUp(bool u) { up_ = u; }
   void setTimeout(uint32_t ms) { timeout_ = ms; }
  private:
-  bool waitAck(uint32_t& value);
+  bool waitAck(uint32_t& value, uint32_t* time = nullptr);
   Stream&  io_;
   bool     up_ = true;
   uint32_t timeout_ = 3000;
+  uint32_t time_ = 0;
 };
 
 // ── the secure element ────────────────────────────────────────────────────

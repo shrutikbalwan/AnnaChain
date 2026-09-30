@@ -119,12 +119,18 @@ uint32_t Gateway::heldThrough(uint32_t device, uint32_t serverAck) const {
   return next - 1;
 }
 
-bool Gateway::answerLastAck(uint32_t device, uint32_t& value) {
+bool Gateway::answerLastAck(uint32_t device, uint32_t& value, uint32_t* unixNow) {
+  if (unixNow) *unixNow = 0;
   if (!up_.up()) return false;                     // no value: see ac_gateway.h
   uint32_t a = 0;
   if (!up_.queryLastAck(device, a)) return false;  // the server did not say
   remember(device, a);
   value = heldThrough(device, a);
+  if (unixNow) {
+    uint32_t t = 0;
+    if (up_.serverTime(t))  *unixNow = t;          // the server's, with its answer
+    else if (clk_.isSet())  *unixNow = clk_.now(); // or NTP's, if it has answered
+  }
   return true;
 }
 
@@ -139,9 +145,9 @@ void Gateway::poll() {
     if (kind == FRAME_QUERY) {
       // A node asking what the server holds for it. Answered from the server,
       // never from what this gateway has acknowledged (ac_gateway.h).
-      uint32_t device = le32(rec), v = 0;
-      bool known = answerLastAck(device, v);
-      radio_.lastAck(device, known, v);
+      uint32_t device = le32(rec), v = 0, t = 0;
+      bool known = answerLastAck(device, v, &t);
+      radio_.lastAck(device, known, v, t);
       continue;
     }
 

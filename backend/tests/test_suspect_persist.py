@@ -82,3 +82,17 @@ def test_reset_leaves_no_suspect(client, auth):
     assert rows() == []
     assert app_mod.engine.suspect == set()
     assert rebuilt().suspect == set()
+
+
+def test_agreeing_buckets_clear_it_in_the_database(client):
+    """P3: nothing called clear_suspect(), so a recovered node stayed suspect
+    for ever, and since S4 that was durable."""
+    flag(app_mod.engine)
+    for k in range(DISAGREE_RUNS):
+        app_mod.engine.diagnose("T1", 1790400000 + (DISAGREE_RUNS + k) * 300,
+                                {1: 4.0, 2: 4.1, ODD: 4.2})
+    db.commit()
+    assert app_mod.engine.suspect == set()
+    assert rows() == []
+    assert rebuilt().suspect == set()
+    assert [a["kind"] for a in db.alerts(100, device_id=ODD)][0] == "sensor_agrees"

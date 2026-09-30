@@ -17,9 +17,11 @@
 // modem would be another ILink behind the same interface.
 //
 // NtpClock is an IClock. Until an NTP answer arrives it runs from the
-// compiled-in date (kClockBase) plus uptime, exactly as ArduinoClock does, and
-// it says which it is using. The server's timestamp check (checks.py, check 5)
-// is what catches a clock that never synced.
+// build time (kClockBase, ac_hal.h) plus uptime, exactly as ArduinoClock does,
+// and isSet() says which it is using. Once synced, the gateway passes its time
+// down to nodes with their last-ACK when the server gave none (ac_gateway.h).
+// The server's timestamp check (checks.py, check 5) is what catches a clock
+// that never synced.
 #pragma once
 #ifdef ARDUINO
 #include <Arduino.h>
@@ -36,6 +38,7 @@ class NtpClock : public IClock {
   // Ask pool.ntp.org / time.google.com; needs Wi-Fi up. Waits at most timeoutMs.
   bool sync(uint32_t timeoutMs = 10000);
   bool synced() const { return synced_; }
+  bool isSet() const override { return synced_; }
   uint32_t now() override;
   void sleep(uint32_t ms) override { delay(ms); }
  private:
@@ -49,6 +52,12 @@ class WifiHttpLink : public ILink {
   explicit WifiHttpLink(const char* baseUrl) : base_(baseUrl) {}
   bool up() override;
   bool queryLastAck(uint32_t device, uint32_t& lastAck) override;
+  // "now" from /api/lastack: the server's clock, with its last-ACK.
+  bool serverTime(uint32_t& unixNow) override {
+    if (!time_) return false;
+    unixNow = time_;
+    return true;
+  }
   bool send(const uint8_t* recs, size_t count, uint32_t& acked) override;
   bool declareGap(uint32_t device, uint32_t from, uint32_t to,
                   const uint8_t mac[32]) override;
@@ -58,6 +67,7 @@ class WifiHttpLink : public ILink {
   String base_;
   bool enabled_ = true;
   int status_ = 0;
+  uint32_t time_ = 0;
 };
 
 }  // namespace ac

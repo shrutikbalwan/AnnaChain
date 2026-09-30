@@ -19,6 +19,11 @@ the board is the antenna being pulled.
     node -> T <dev> <assign|tap> <uid> <time>  a PN532 tap: becomes a checkpoint
     node -> # ...                human-readable chatter, echoed, not parsed
     us   -> A <seq>              accepted up to here
+    us   -> A <seq> <unix>       the answer to Q: last-ACK and the server's clock,
+                                 which is how the node learns the time. A board
+                                 that predates the time field reads <seq> with
+                                 toInt(), which stops at the space, so it is
+                                 unaffected. An unknown device gets "A 0", no time.
     us   -> N <reason>           refused
 """
 import argparse, json, sys, urllib.request, urllib.error
@@ -85,16 +90,25 @@ def main(argv=None):
                     print(f"registered {device:08X}, server has {r['last_ack']}")
                 except urllib.error.HTTPError as e:
                     # 409: the board presented a different key from the one on
-                    # file. That is either a wiped board or an attack, and it is
-                    # not this script's job to decide which.
+                    # file. That is either a wiped board, a board sharing an id
+                    # with a demo capture, or an attack, and it is not this
+                    # script's job to decide which. It can say what to do.
                     print(f"\033[31m  enrolment refused ({e.code}): "
                           f"{e.read().decode(errors='replace')}\033[0m")
+                    if e.code == 409:
+                        print(f"\033[31m  device {device:08X} is enrolled with a different "
+                              f"key. If this database has seen a demo, run `make clean` "
+                              f"(mingw32-make clean) and restart the server; if this is a "
+                              f"re-flashed board, an admin can rotate the key (POST "
+                              f"/api/register with rotate=true). Until then every record "
+                              f"will be refused as `bad signature`.\033[0m")
 
             elif line.startswith("Q "):
                 dev = int(line.split()[1])
                 try:
                     r = call(a.base, f"/api/lastack/{dev}", method="GET")
-                    reply(f"A {r['last_ack']}")
+                    now = r.get("now")          # an older server sends none
+                    reply(f"A {r['last_ack']} {now}" if now else f"A {r['last_ack']}")
                 except urllib.error.HTTPError:
                     reply("A 0")          # unknown device: start from the beginning
 
@@ -110,6 +124,8 @@ def main(argv=None):
                         reply(f"A {r['last_ack']}")
                     else:
                         print(f"  \033[31mrefused: {r['reason']}\033[0m")
+                        if r.get("hint"):
+                            print(f"  \033[31m  {r['hint']}\033[0m")
                         reply(f"N {r['reason']}")
                     pending, expect = [], 0
 
