@@ -17,7 +17,9 @@ authority on what it has received. Neither guesses. `/api/lastack` is how the
 node asks.
 """
 import io
+import math
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
@@ -28,11 +30,36 @@ from pydantic import BaseModel
 from . import auth, checks, db, ledger, shelflife
 from .alerts import AlertEngine, fmt_dur
 
-app = FastAPI(title="AnnaChain", version="0.3")
 STATIC = Path(__file__).with_name("static")
 
 verifier = checks.Verifier()
 engine = AlertEngine(db)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    """Run startup logic, yield to serve requests, then clean up on shutdown.
+    Replaces the deprecated @app.on_event(\"startup\") pattern."""
+    db.init()
+    for d in db.devices():
+        verifier.load(d["device_id"], d["last_ack"], d["tip_digest"], d["anchor_next"],
+                      d["last_ts"])
+    throttle.load()
+    if db.user_count() == 0:
+        # First run: one operator account, so the dashboard is never open by
+        # accident. The password is printed once and only once.
+        salt, pw = auth.hash_password("annachain")
+        db.create_user("operator", salt, pw, "admin")
+        print("\n  no users existed, so one was created:"
+              "\n    username: operator"
+              "\n    password: annachain"
+              "\n  change it with POST /api/password before anyone else can reach this.\n")
+    yield
+    # Shutdown: persist the throttle state so a restart does not clear lockouts.
+    throttle.save()
+
+
+app = FastAPI(title="AnnaChain", version="0.3", lifespan=lifespan)
 
 # A node that is online transmits each reading as it is taken, so a batch of
 # one is normal traffic and a batch of many is a backlog being drained. That,
@@ -51,21 +78,6 @@ CAL_DEFAULT_MONTHS = 12          # EN 13486 verification interval
 chain = ledger.get_ledger()      # Fabric if it is really there, else local
 
 
-@app.on_event("startup")
-def startup():
-    db.init()
-    for d in db.devices():
-        verifier.load(d["device_id"], d["last_ack"], d["tip_digest"], d["anchor_next"],
-                      d["last_ts"])
-    if db.user_count() == 0:
-        # First run: one operator account, so the dashboard is never open by
-        # accident. The password is printed once and only once.
-        salt, pw = auth.hash_password("annachain")
-        db.create_user("operator", salt, pw, "admin")
-        print("\n  no users existed, so one was created:"
-              "\n    username: operator"
-              "\n    password: annachain"
-              "\n  change it with POST /api/password before anyone else can reach this.\n")
 
 
 # ── who is asking ────────────────────────────────────────────────────────
@@ -89,12 +101,33 @@ class NewPassword(BaseModel):
     new: str
 
 
+throttle = auth.Throttle(db=db)
+
+
+def _refused(status, detail, wait):
+    """The delay goes in the body and in Retry-After, so a client (or a person)
+    knows how long to wait instead of guessing."""
+    wait = int(math.ceil(wait))
+    headers = {"Retry-After": str(wait)} if wait else {}
+    return JSONResponse({"detail": detail, "retry_after_s": wait}, status, headers=headers)
+
+
 @app.post("/api/login")
-def login(body: Login):
+def login(body: Login, request: Request):
+    source = request.client.host if request.client else "?"
+    wait = throttle.retry_after(body.username, source)
+    if wait > 0:
+        return _refused(429, f"too many failed sign-ins; try again in {int(math.ceil(wait))} s",
+                        wait)
     u = db.user(body.username)
     # Same answer either way, so this cannot be used to enumerate usernames.
     if not u or not auth.check_password(body.password, u["salt"], u["pwhash"]):
-        raise HTTPException(401, "wrong username or password")
+        wait = throttle.failure(body.username, source)
+        if wait > 0:
+            return _refused(429, f"wrong username or password; too many failed "
+                                 f"sign-ins, try again in {int(math.ceil(wait))} s", wait)
+        return _refused(401, "wrong username or password", 0)
+    throttle.success(body.username, source)
     token = auth.new_token()
     db.put_session(token, u["username"], auth.expiry())
     return {"token": token, "username": u["username"], "role": u["role"]}

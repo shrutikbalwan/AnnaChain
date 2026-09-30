@@ -171,6 +171,17 @@ CREATE TABLE IF NOT EXISTS ingest_log (
   n        INTEGER NOT NULL,
   accepted INTEGER NOT NULL
 );
+
+-- Brute-force lockout state. Written on server shutdown, read on startup,
+-- so a restart does not clear an active lockout. Expired rows are pruned
+-- when the throttle is reloaded.
+CREATE TABLE IF NOT EXISTS login_throttle (
+  key_type     TEXT NOT NULL,   -- 'user' or 'src'
+  key_value    TEXT NOT NULL,   -- case-folded username or source IP
+  failures     INTEGER NOT NULL,
+  locked_until REAL NOT NULL,
+  PRIMARY KEY (key_type, key_value)
+);
 """
 
 
@@ -187,7 +198,7 @@ def conn():
 
 TABLES = ("records", "alerts", "gaps", "rejects", "anchors",
           "ingest_log", "shipments", "devices", "checkpoints", "chain_marks",
-          "device_keys")
+          "device_keys", "login_throttle")
 # `audit` survives a reset on purpose: it is the record of who did what.
 # `users` and `sessions` are deliberately not wiped by a reset: losing your
 # login because you reset the demo data is a bad afternoon.
