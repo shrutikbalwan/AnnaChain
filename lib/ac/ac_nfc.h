@@ -1,8 +1,9 @@
 // AnnaChain — the PN532 NFC reader: who took custody of this crate, and when.
 //
 // ╔══════════════════════════════════════════════════════════════════════════╗
-// ║ UNPROVEN. This compiles against the Adafruit PN532 library. It has never ║
-// ║ read a tag: no PN532 has arrived. docs/HIL.md step 3.                    ║
+// ║ UNPROVEN. This has never been compiled against the Adafruit PN532        ║
+// ║ library, and it has never read a tag: no PN532 has arrived. docs/HIL.md  ║
+// ║ step 3.                                                                  ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // Two uses, one mechanism: a tap is a tag UID seen at a moment.

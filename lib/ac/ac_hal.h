@@ -94,7 +94,7 @@ struct ISigner {
 // An ECDSA signature is 64 bytes (r, s). The record format reserves 32 bytes
 // for its signature and ISigner above produces 32, so the ATECC608B cannot
 // simply replace SoftSigner. This interface exists so the chip's driver can be
-// written, compiled and exercised on arrival day without pretending otherwise.
+// written now and exercised on arrival day without pretending otherwise.
 //
 // Nothing signs records with it yet. Moving records onto it is a planned,
 // separate change — a v2 record of 116 bytes, verified by the server and by

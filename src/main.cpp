@@ -11,8 +11,12 @@
 //
 // node_mock and node use only parts of the design that already run on the
 // laptop (the USB serial link, LittleFS). node_lora adds the SX1262 and PN532
-// drivers, which are UNPROVEN: they compile and have never met their chips.
+// drivers, which are UNPROVEN: none of these environments has ever been
+// compiled, and the drivers have never met their chips.
 // Every pin comes from lib/ac/ac_pins.h, where each one is justified.
+//
+// Arrival day (docs/HIL.md): node_mock is step 1, node is step 2, node_lora is
+// steps 3 (PN532 taps) and 5 (records over the SX1262 to the gateway).
 #include <Arduino.h>
 #include "ac_node.h"
 #include "ac_esp.h"

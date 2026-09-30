@@ -1,4 +1,5 @@
-// UNPROVEN — compiles; never run on a network from a board. See ac_net.h.
+// UNPROVEN — never compiled for the board; never run on a network from a
+// board. See ac_net.h.
 #ifdef ARDUINO
 #include "ac_net.h"
 #include "ac_sha256.h"

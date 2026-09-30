@@ -1,9 +1,10 @@
 // AnnaChain — the SX1262 LoRa radio, both ends of it.
 //
 // ╔══════════════════════════════════════════════════════════════════════════╗
-// ║ UNPROVEN. This compiles against RadioLib. It has never keyed an SX1262:  ║
-// ║ none has arrived. Range, packet loss, timing and the TCXO/RF-switch      ║
-// ║ settings below are all unmeasured. docs/HIL.md steps 5 and 6.            ║
+// ║ UNPROVEN. This has never been compiled against RadioLib for the board,   ║
+// ║ and it has never keyed an SX1262: none has arrived. Range, packet loss,  ║
+// ║ timing and the TCXO/RF-switch settings below are all unmeasured.         ║
+// ║ docs/HIL.md steps 5 and 6.                                               ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // Band: IN865, 865–867 MHz — not 433, not 915. The carrier defaults to

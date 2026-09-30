@@ -1,4 +1,5 @@
-// UNPROVEN — compiles; never run against a PN532. See ac_nfc.h.
+// UNPROVEN — never compiled for the board; never run against a PN532.
+// See ac_nfc.h.
 #ifdef ARDUINO
 #include "ac_nfc.h"
 

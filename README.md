@@ -114,6 +114,10 @@ docs/VERIFY.md      A hostile checklist for proving the project actually
                     works. Paste it into a fresh AI session, or work
                     through it by hand.
 docs/DEMO.md        The 90 seconds you perform in front of a judge.
+docs/HIL.md         Arrival day, steps 0-6: what to run when each part lands,
+                    what it must print, and how it goes wrong.
+docs/BRINGUP.md     The irreversible steps (ATECC608 locking, NVS erase), the
+                    smoke-test format, the pin check, SX1262 troubleshooting.
 ```
 
 The node logic never sees a `Serial`, a `LittleFS` or a `Wire`. That is why the

@@ -14,8 +14,9 @@
 // Parts, in order: BOARD, FLASH, I2C, SHT40, ATECC, SX1262, PN532, BATT.
 // Type r and Enter to run it again (after re-seating a wire, say).
 //
-// Like the drivers it calls, this is UNPROVEN: it compiles, and has never run
-// on the hardware it probes. Its first real run is its own first test.
+// Like the drivers it calls, this is UNPROVEN: it has never been compiled, and
+// has never run on the hardware it probes. Its first real run is its own first
+// test. It is step 0 of docs/HIL.md.
 #include <Arduino.h>
 #include <Wire.h>
 #include <LittleFS.h>

@@ -1,9 +1,10 @@
 // AnnaChain — the ATECC608B secure element: ECDSA P-256, key inside the chip.
 //
 // ╔══════════════════════════════════════════════════════════════════════════╗
-// ║ UNPROVEN. This driver compiles. It has never talked to an ATECC608B:     ║
-// ║ none has arrived. Treat every line as a hypothesis until docs/HIL.md     ║
-// ║ step 4 has been run on a real part and its output recorded.              ║
+// ║ UNPROVEN. This driver has never been compiled for the board, and it has  ║
+// ║ never talked to an ATECC608B: none has arrived. Treat every line as a    ║
+// ║ hypothesis until docs/HIL.md step 4 has been run on a real part and its  ║
+// ║ output recorded.                                                         ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // Which key it uses. The part on the buy list is the ATECC608B-TNGTLS
