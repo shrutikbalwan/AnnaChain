@@ -48,6 +48,35 @@ g++ -std=gnu++17 -DAC_LOG_CAPACITY=4096 -Ilib/ac `
 Use **Windows Terminal** or **PowerShell 7**, not the old `cmd.exe` — the output
 is coloured and legacy `cmd` shows the colour codes as stray characters.
 
+### Or all of it with make
+
+`choco install mingw` also gives you `mingw32-make`. From PowerShell in the
+project folder, these four run as they are (checked from a fresh clone, and on
+every push by the `windows` job in CI):
+
+```powershell
+mingw32-make PY=python clean           # removes the last run's binaries, captures and database
+mingw32-make PY=python fleet           # builds fleet.exe and writes fleet.capture
+mingw32-make PY=python firmware-test   # 141 checks, 0 failed
+mingw32-make PY=python demo            # ends with DEMO PASSED
+```
+
+Then, in a second window, `python -m uvicorn backend.app:app --port 8000`, and
+in the first, `python backend/feed_sim.py fleet.capture --reset`.
+
+**`clean` refuses while the server is running.** Windows cannot delete a file
+that is open, and the server holds `backendnnachain.db` open. `clean` names
+what it could not remove, says `the server is still running — stop uvicorn
+first`, and fails. Stop the server (Ctrl+C in its window) and run it again. A
+clean that "succeeded" but left the database behind would put yesterday's data
+in front of the judges.
+
+**Check what is on port 8000 before `--reset`.** `feed_sim.py --reset` wipes
+whichever AnnaChain server answers on its `--base` (default port 8000). If a
+server is already running from an earlier session, a new one cannot bind the
+port (it says so only in its own window), and the feed will reset the old one
+instead.
+
 ---
 
 ## B. Set up for the board (do this while the parts ship)
