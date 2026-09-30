@@ -75,10 +75,10 @@ demo-seed: clean
 
 # Run this before every demo. A database left over from testing carries
 # whatever was done to it: re-keyed devices, declared gaps, test nodes.
+# tools/clean.py, not rm: rm is not a Windows command. It names every file it
+# cannot remove and fails, and if that file is the database it says the
+# server is still running, which is always why.
 clean:
-	rm -f demo selftest dump fleet *.exe *.capture records.jsonl \
-	      backend/annachain.db backend/annachain.db-wal backend/annachain.db-shm \
-	      seed.capture \
-	      backend/ledger.jsonl
+	$(PY) tools/clean.py
 
 .PHONY: all demo test firmware-test backend-test capture fleet serve demo-full demo-seed clean
