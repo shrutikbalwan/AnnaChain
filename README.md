@@ -1,6 +1,6 @@
 # AnnaChain — node firmware
 
-**SIH 2026 · PS 26232 · Low-Cost IoT Blockchain Nodes for Farm-to-Fork Traceability · MoFPI · Hardware**
+
 
 [![tests](https://github.com/shrutikbalwan/AnnaChain/actions/workflows/tests.yml/badge.svg)](https://github.com/shrutikbalwan/AnnaChain/actions/workflows/tests.yml)
 
