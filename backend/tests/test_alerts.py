@@ -106,3 +106,40 @@ def test_two_nodes_disagreeing_name_no_culprit(engine):
         engine.diagnose("T2", k * 300, {1: 4.0, 2: 9.0})
     assert engine.suspect == set()
     assert kinds(engine) == ["disagree"]
+
+
+# ── P3: a suspect node that agrees again is cleared ──────────────────────
+def test_a_suspect_that_agrees_again_is_cleared(engine):
+    """Clearing takes DISAGREE_RUNS agreeing buckets, as flagging takes
+    DISAGREE_RUNS disagreeing ones: one good bucket is noise either way."""
+    truck(engine, 4.0, 4.1, 9.0, DISAGREE_RUNS)
+    assert engine.suspect == {3}
+    for k in range(DISAGREE_RUNS - 1):
+        engine.diagnose("T1", (DISAGREE_RUNS + k) * 300, {1: 4.0, 2: 4.1, 3: 4.2})
+    assert engine.suspect == {3}                   # not yet
+    engine.diagnose("T1", (2 * DISAGREE_RUNS) * 300, {1: 4.0, 2: 4.1, 3: 4.2})
+    assert engine.suspect == set()
+    assert kinds(engine) == ["suspect_sensor", "sensor_agrees"]
+    assert engine.fake.suspects() == []            # the persisted row is gone too
+
+
+def test_agreement_must_be_consecutive(engine):
+    truck(engine, 4.0, 4.1, 9.0, DISAGREE_RUNS)
+    t = DISAGREE_RUNS
+    for k in range(DISAGREE_RUNS - 1):             # agrees, agrees...
+        t += 1
+        engine.diagnose("T1", t * 300, {1: 4.0, 2: 4.1, 3: 4.2})
+    t += 1
+    engine.diagnose("T1", t * 300, {1: 4.0, 2: 4.1, 3: 9.0})    # ...drifts again
+    for k in range(DISAGREE_RUNS - 1):
+        t += 1
+        engine.diagnose("T1", t * 300, {1: 4.0, 2: 4.1, 3: 4.2})
+    assert engine.suspect == {3}
+
+
+def test_a_cleared_node_raises_temperature_alarms_again(engine):
+    truck(engine, 4.0, 4.1, 9.0, DISAGREE_RUNS)
+    for k in range(DISAGREE_RUNS):
+        engine.diagnose("T1", (DISAGREE_RUNS + k) * 300, {1: 4.0, 2: 4.1, 3: 4.2})
+    feed(engine, [11.0] * EXCURSION_MIN, dev=3)
+    assert "temp_high" in kinds(engine)

@@ -195,6 +195,31 @@ class AlertEngine:
         if st["last_bucket"] == bucket:
             return None
         st["last_bucket"] = bucket
+        st.setdefault("agree", {})
+
+        # A suspect node earns its trust back the way it lost it: DISAGREE_RUNS
+        # consecutive buckets, here agreeing with the median of the others
+        # (within DISAGREE_C). One agreeing bucket is noise, exactly as one
+        # disagreeing bucket is. Without this a recovered node stayed suspect
+        # until the database was reset, and since S4 persisted the suspect set,
+        # for ever (P3).
+        cleared = None
+        for dev in [d for d in readings if d in self.suspect]:
+            others = sorted(v for k, v in readings.items() if k != dev)
+            if not others:
+                continue
+            med = others[len(others) // 2] if len(others) % 2 else \
+                (others[len(others) // 2 - 1] + others[len(others) // 2]) / 2
+            if abs(readings[dev] - med) < DISAGREE_C:
+                st["agree"][dev] = st["agree"].get(dev, 0) + 1
+                if st["agree"][dev] >= DISAGREE_RUNS:
+                    st["agree"].pop(dev)
+                    self.clear_suspect(dev)
+                    cleared = dev
+            else:
+                st["agree"].pop(dev, None)
+        if cleared is not None:
+            st["run"].pop(cleared, None)
 
         items = sorted(readings.items(), key=lambda kv: kv[1])
         lo_dev, lo_t = items[0]
