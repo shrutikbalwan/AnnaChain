@@ -1,4 +1,5 @@
-// UNPROVEN — compiles; never run against a PN532. See ac_nfc.h.
+// UNPROVEN — compiles (envs node_lora, smoke); never run against a PN532.
+// See ac_nfc.h.
 #ifdef ARDUINO
 #include "ac_nfc.h"
 

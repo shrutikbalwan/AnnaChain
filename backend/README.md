@@ -11,9 +11,13 @@ It runs with no hardware at all.
 ## Run it
 
 ```powershell
-py -m pip install -r backend/requirements.txt
+py -m pip install -r backend/requirements.lock     # the exact versions tested
 py -m uvicorn backend.app:app --port 8000
 ```
+
+`requirements.txt` lists what the server needs, as ranges; `requirements.lock`
+pins the exact set the suite was last run against. On the venue laptop, install
+the lock.
 
 Open **http://127.0.0.1:8000**. It asks you to sign in.
 
@@ -33,7 +37,18 @@ on every record, not by a password. A node has no password to lose.
 `backend/annachain.db*` and `backend/ledger.jsonl`). A database left over from
 testing shows the judges whatever was done to it.
 
-Now give it a trip. In a second terminal, first build the capture generator
+**The one-command version** is `mingw32-make demo-full` (clean, build, capture,
+serve, feed; the server stays up until Ctrl+C). If the compiler misbehaves on
+the venue laptop, `mingw32-make demo-seed` needs none: it feeds the committed
+capture `tools/seed/fleet.seed.capture`, **re-timed at seed time** to end now
+and re-signed with its own published dev keys (the byte-for-byte equivalent of
+a fresh `fleet 300 120` run, checked by `backend/tests/test_feed_sim.py`), at
+full speed, into a clean database: three shipments, 420 records each, node B
+suspect. Re-timing is honest only because those keys are public development
+keys; it could not be done to a real device's records. Both refuse to start if
+something already listens on port 8000.
+
+The long way, step by step: in a second terminal, first build the capture generator
 (same compiler you already used), and make the capture right before you replay
 it — the trip ends at the moment it is captured, and the server refuses
 readings older than a node could have held them:
@@ -48,6 +63,14 @@ then replay it:
 ```powershell
 py backend/feed_sim.py demo.capture --reset
 ```
+
+Before posting anything, the replayer asks the server how old a reading may be
+(`max_hold_s` in `/api/state`, which is `MAX_HOLD_S` in `checks.py`) and compares
+it with the capture's first record. Older than that, it stops with a non-zero
+exit, posts nothing, and prints `regenerate: mingw32-make fleet` and the replay
+command; older than a quarter of it, it warns and carries on. `--allow-stale`
+feeds an archived capture anyway, with a one-line warning — the server will
+still refuse the readings it considers too old.
 
 Enrolling the capture's devices is an operator action, so the replayer signs in
 — as `operator` / `annachain` unless you pass `--user` and `--password`.
@@ -251,8 +274,16 @@ accurate.
   Fabric adds and why it is in the design.
 - **SQLite, not PostgreSQL + TimescaleDB.** The schema is written for the move
   and `records` is the hypertable candidate, but the finale build is not done.
-- **Signatures are HMAC.** Symmetric, so the server holds the same key. That is
-  the weakness the ATECC608B removes. Two things follow from it today:
+- **Signatures are HMAC — a scope decision, not an oversight** (see
+  [`docs/CRYPTO.md`](../docs/CRYPTO.md), decided 30 Sep 2026: "driver now,
+  format later"). The ATECC608B is on the BOM and its driver
+  (`lib/ac/ac_atecc.*`, `IEcdsaSigner`) exists, but a P-256 signature is 64
+  bytes and a v1 record has 32, so ECDSA is a record-format change, specified
+  there and not built. Records are format v1: 84 bytes, no version byte,
+  identified by length; any later format starts with a version byte, and the
+  server refuses a format it does not know by name. HMAC is symmetric, so the
+  server holds the same key. That is the weakness the ATECC608B removes. Two
+  things follow from it today:
   - **A buyer cannot check a signature.** The trace page re-derives the hash
     chain on the phone, but the signature check happens on our server, so the
     buyer is trusting us for that part. The page says so.
@@ -285,24 +316,42 @@ accurate.
   handed upstream unchanged and in order; a notice lost to gateway overrun is
   counted (`gapsDropped`). `backend/tests/test_gateway_gap_e2e.py` runs the
   C++ node and gateway and checks what the buyer sees.
-- **Records the gateway itself drops are not declared.** When the *gateway's*
-  buffer overruns (the node was in LoRa range but the cab had no signal for
-  longer than the gateway can hold), the lost records are counted on the
-  gateway, but nothing signed tells the server. The node has already been
-  acknowledged hop-by-hop, so it does not resend, and the server waits for the
-  first missing sequence number. Closing this needs the node to reconcile
-  against the server's last-ACK through the gateway, which the LoRa path does
-  not do yet.
+- **Records the gateway itself loses are resent** (done, in the simulator).
+  When the *gateway's* buffer overruns (the cab had no signal for longer than
+  it can hold) or is lost (a cab power cut: it is RAM), the node is no longer
+  left believing its hop-by-hop acks. It asks the gateway what the server has;
+  the gateway answers with the server's own last-ACK, asked at that moment and
+  extended only over frames it still holds (`lib/ac/ac_gateway.h`), so the node
+  resends from the first record the server is missing. If the node's own flash
+  has wrapped past those records too, the node declares them lost with a signed
+  gap notice, as for any other hole. Nothing relies on the gateway's `dropped`
+  counter: it is unsigned and is not evidence of anything, so it is never sent
+  to the server. While the cab has no signal the gateway answers "no value" and
+  the node carries on; recovery happens once the uplink is back. Proved in
+  `tools/selftest.cpp`; on the radio it is `lib/ac/ac_lora.*`, which is
+  UNPROVEN like the rest of that driver.
 - **Clock checks are bounds, not a time source.** A reading more than 60 s
   ahead of the server, more than 30 days old, or earlier than the reading
   before it is refused. A clock that is wrong by less than that (a few hours
   behind, say) is not caught, and the node still has no NTP or RTC. The 30 days
   is flash capacity (about 14 days at 5-minute sampling) plus a gateway buffer.
-- **Ethylene is simulated only when asked for.** The capture tools default to
-  "not fitted", like the board. With `--ethylene` the simulator invents a
-  curve, and the record format has no flag saying so, so the server cannot
-  tell; the dashboard's note under the chart says where such values can only
-  come from.
+- **NFC custody taps travel over USB only — handover is the USB-tethered
+  configuration.** The PN532 build (`env:node_lora`) prints each tap on the
+  node's serial line (`T <device> <assign|tap> <uid> <time>`), and
+  `bridge_serial.py`, run on the node's USB port, turns it into a checkpoint on
+  the node's shipment (`assign` = commissioning, `tap` = inspecting). Over LoRa a
+  tap is not carried at all: there is no `FRAME_TAP`, so a node that is not
+  tethered records no handovers. A tap is also not signed and not in the hash
+  chain: it is a logged claim, and the checkpoint's note says so. Until this
+  change the bridge ignored `T` lines, so taps reached nothing even over USB.
+  Any slide implying custody events travel over the radio is wrong.
+- **Ethylene is simulated only when asked for, and then it says so** (done).
+  The capture tools default to "not fitted", like the board. With `--ethylene`
+  the simulator invents a curve, and every such record carries
+  `FLAG_SIMULATED` (bit 6, 0x40), inside the signature. The dashboard badges
+  them SIMULATED under the ethylene chart, and the buyer's page counts them
+  with the same badge. The flag covers the invented ethylene only: the mock
+  temperatures of `node_mock`, `dump` and `fleet` are not flagged.
 - **Failed logins back off** (done). After 5 failures in a row for a username,
   or from one address, sign-in is refused for 30 s, doubling with each further
   failure up to 15 minutes; the right password is refused too while the lock
@@ -312,6 +361,14 @@ accurate.
   behind a reverse proxy every request comes from the proxy's address; and
   anyone can lock the real operator out for up to 15 minutes by failing on
   purpose, which is the usual price of a per-username lock.
+- **A suspect sensor stays suspect across a restart** (done). The set lives in
+  the `suspects` table (device, truck, when, and the readings that decided
+  it), written when a node is flagged, deleted when it is cleared, emptied by
+  `/api/reset`, and loaded at startup. The run lengths building up to a flag
+  are not persisted; after a restart they rebuild within three readings.
+  What does not exist: anything that *clears* a suspect. `clear_suspect()` is
+  never called, so a node stays suspect until the database is reset, even if it
+  agrees with the others again.
 - **Chart.js is vendored** (done). `backend/static/chart.umd.min.js` is
   Chart.js 4.4.1, checked against the SRI hash cdnjs publishes, with its MIT
   licence beside it. The dashboard never needs the CDN; the hand-drawn
@@ -320,11 +377,16 @@ accurate.
   `docs/SIH2026_26232_AnnaChain_OfficialFormat.pptx`, and no file of that name
   exists yet. The only 26232 deck found (`SIH2026_26232_SecureHarvest_OfficialFormat.pptx`)
   has 6 slides but still carries the old name on slides 1, 2 and 5.
-- **Calibration (check 7) is implemented but unpopulated.** Each device carries
-  a calibration date and an EN 13486 interval; a lapsed sensor raises an alert
-  and its readings are marked as uncertified. The readings are still stored —
-  refusing them would throw away the only record of the journey. What does not
-  exist yet is a real calibration registry with real certificates in it.
+- **Calibration (check 7) is implemented, with demo data only.** Each device
+  carries a calibration date and an EN 13486 interval, set by an operator with
+  `POST /api/calibration/<device>` (`cal_date`, `months`, `ref`; audited). A
+  reading taken after it lapses is still stored — refusing it would throw away
+  the only record of the journey — but it raises a `calibration` alert and is
+  stored with `uncertified = 1` (`u` in `/api/state`). `feed_sim.py` records a
+  **demo** calibration for each device it enrols (60 days before the trip, 12
+  months, `ref` saying it is a demo with no certificate; `--no-calibration`
+  skips it). What does not exist is a real calibration registry with real
+  certificates in it, and neither page shows the `uncertified` mark yet.
 - **The ethylene rule is a rise against the trip's own baseline**, not an
   absolute ppb threshold, because we have not chosen a sensor and will not quote
   a calibrated number we cannot measure.

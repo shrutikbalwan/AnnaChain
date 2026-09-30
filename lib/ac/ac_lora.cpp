@@ -1,4 +1,5 @@
-// UNPROVEN — compiles; never run against an SX1262. See ac_lora.h.
+// UNPROVEN — compiles (envs node_lora, gateway, smoke); never run against an SX1262.
+// See ac_lora.h.
 #ifdef ARDUINO
 #include "ac_lora.h"
 
@@ -118,6 +119,12 @@ bool LoraRadio::receive(uint8_t frame[kRecBytes], uint8_t& kind, int16_t& rssi) 
       kind = k;
       return true;
     }
+    if (k == FRAME_QUERY && n >= 4) {           // device 4: padded to a frame
+      memset(frame, 0, kRecBytes);
+      memcpy(frame, buf, 4);
+      kind = k;
+      return true;
+    }
     // anything else (another gateway's ack, a stray frame) is ignored
   }
 }
@@ -126,6 +133,12 @@ bool LoraRadio::ack(uint32_t device, uint32_t seq) {
   uint8_t p[8];
   put32(p, device); put32(p + 4, seq);
   return t_.transmit(FRAME_ACK, p, sizeof(p));
+}
+
+bool LoraRadio::lastAck(uint32_t device, bool known, uint32_t seq) {
+  uint8_t p[9];
+  put32(p, device); p[4] = known ? 1 : 0; put32(p + 5, seq);
+  return t_.transmit(FRAME_LASTACK, p, sizeof(p));
 }
 
 // ── node side ──────────────────────────────────────────────────────────────
@@ -144,12 +157,29 @@ bool LoraNodeLink::sendFrame(uint8_t kind, const uint8_t frame[kRecBytes],
   return false;               // no ack: treat as no link, keep everything, retry later
 }
 
-bool LoraNodeLink::queryLastAck(uint32_t, uint32_t& lastAck) {
-  // Hop-by-hop, as on the simulator: the gateway does not yet relay the
-  // server's last-ACK back down (backend/README.md, open limitations).
+bool LoraNodeLink::queryLastAck(uint32_t device, uint32_t& lastAck) {
+  // Ask the gateway what the SERVER holds. "No value" (the gateway has no
+  // uplink, or the server did not answer) and no answer at all both return
+  // false: the node keeps what it last knew. Never ack_, which only says the
+  // gateway once had it, and never 0, which would resend the whole flash.
   if (!up()) return false;
-  lastAck = ack_;
-  return true;
+  uint8_t q[4];
+  put32(q, device);
+  for (int attempt = 0; attempt < tries_; ++attempt) {
+    if (!t_.transmit(FRAME_QUERY, q, sizeof(q))) return false;
+    uint32_t t0 = millis();
+    while (millis() - t0 < timeout_) {
+      uint8_t k; uint8_t p[16]; int16_t rssi;
+      int n = t_.poll(k, p, sizeof(p), rssi);
+      if (n == 9 && k == FRAME_LASTACK && get32(p) == device) {
+        if (!p[4]) return false;                 // the gateway has no value
+        lastAck = get32(p + 5);
+        return true;
+      }
+      delay(2);
+    }
+  }
+  return false;
 }
 
 bool LoraNodeLink::send(const uint8_t* recs, size_t count, uint32_t& acked) {
@@ -184,6 +214,7 @@ int  Sx1262Transport::poll(uint8_t&, uint8_t*, size_t, int16_t&) { return -1; }
 bool Sx1262Transport::versionString(char out[17]) { out[0] = 0; return false; }
 bool LoraRadio::receive(uint8_t*, uint8_t&, int16_t&) { return false; }
 bool LoraRadio::ack(uint32_t, uint32_t) { return false; }
+bool LoraRadio::lastAck(uint32_t, bool, uint32_t) { return false; }
 bool LoraNodeLink::queryLastAck(uint32_t, uint32_t&) { return false; }
 bool LoraNodeLink::send(const uint8_t*, size_t, uint32_t&) { return false; }
 bool LoraNodeLink::declareGap(uint32_t, uint32_t, uint32_t, const uint8_t*) { return false; }

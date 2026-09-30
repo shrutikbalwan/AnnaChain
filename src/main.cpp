@@ -11,8 +11,12 @@
 //
 // node_mock and node use only parts of the design that already run on the
 // laptop (the USB serial link, LittleFS). node_lora adds the SX1262 and PN532
-// drivers, which are UNPROVEN: they compile and have never met their chips.
+// drivers, which are UNPROVEN: all three environments compile (30 Sep
+// 2026), and the drivers have never met their chips.
 // Every pin comes from lib/ac/ac_pins.h, where each one is justified.
+//
+// Arrival day (docs/HIL.md): node_mock is step 1, node is step 2, node_lora is
+// steps 3 (PN532 taps) and 5 (records over the SX1262 to the gateway).
 #include <Arduino.h>
 #include "ac_node.h"
 #include "ac_esp.h"
@@ -39,9 +43,9 @@ static EspSoftSigner signer;
 static Sx1262Transport lora(pins::kLoraNss, pins::kLoraDio1, pins::kLoraReset,
                             pins::kLoraBusy, pins::kLoraSck, pins::kLoraMiso,
                             pins::kLoraMosi);
-static LoraNodeLink  link(lora);
+static LoraNodeLink  nodeLink(lora);   // not "link": POSIX link() is in scope
 #else
-static SerialLink    link(Serial);
+static SerialLink    nodeLink(Serial); // not "link": POSIX link() is in scope
 #endif
 
 #ifdef AC_MOCK_SENSORS
@@ -55,7 +59,7 @@ static Pn532Reader   nfc(pins::kNfcIrq, pins::kNfcReset);
 static bool          nfcOk = false;
 #endif
 
-static Node node(kDeviceId, clk, sensors, store, link, signer);
+static Node node(kDeviceId, clk, sensors, store, nodeLink, signer);
 
 static uint32_t lastSample = 0;
 static bool     lastButton = true;
@@ -122,11 +126,11 @@ void loop() {
   // The antenna pull.
   bool b = digitalRead(pins::kButton);
   if (lastButton && !b) {                           // pressed
-    link.setUp(!link.up());
+    nodeLink.setUp(!nodeLink.up());
     Serial.printf("\n# LINK %s  (stored %u, waiting %u)\n",
-                  link.up() ? "UP — filling the gap" : "DOWN — still logging",
+                  nodeLink.up() ? "UP — filling the gap" : "DOWN — still logging",
                   store.lastSeq(), node.pending());
-    if (link.up()) node.resync();
+    if (nodeLink.up()) node.resync();
     delay(200);                                     // debounce
   }
   lastButton = b;
@@ -158,7 +162,7 @@ void loop() {
       Record r; decode(raw, r);
       Serial.printf("# %5u  %6.2f C  %5.2f %%  batt %3u  %s  waiting %u\n",
                     r.seq, r.tempC(), r.humidity(), r.batt,
-                    link.up() ? "sent" : "HELD", node.pending());
+                    nodeLink.up() ? "sent" : "HELD", node.pending());
     }
   }
 }

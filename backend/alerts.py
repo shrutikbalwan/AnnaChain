@@ -31,6 +31,14 @@ class AlertEngine:
         self.truck_state = {}      # truck -> disagreement run lengths
         self.suspect = set()       # devices whose readings are not to be trusted
 
+    def load(self):
+        """Restore the suspect set at startup (db.suspects, written through on
+        every flag and clear). Loaded, a suspect's alert counts as already
+        raised, so it is not announced a second time after a restart."""
+        for row in self.db.suspects():
+            self.suspect.add(row["device_id"])
+            self._st(row["device_id"])["open"].add("suspect_sensor")
+
     def _st(self, dev):
         return self.state.setdefault(dev, {
             "hot_run": 0, "cold_run": 0, "open": set(),
@@ -207,8 +215,9 @@ class AlertEngine:
                 if d != odd:
                     runs.pop(d)
 
-            if runs[odd] == DISAGREE_RUNS:
+            if runs[odd] == DISAGREE_RUNS and odd not in self.suspect:
                 self.suspect.add(odd)
+                self.db.add_suspect(odd, truck, bucket, readings)
                 others = ", ".join(f"{v:.1f}" for k, v in readings.items() if k != odd)
                 self._raise(odd, None, bucket, "suspect_sensor", "medium",
                             f"This node reads {odd_t:.1f} \u00b0C while the others on "
@@ -232,6 +241,7 @@ class AlertEngine:
     def clear_suspect(self, device):
         if device in self.suspect:
             self.suspect.discard(device)
+            self.db.drop_suspect(device)       # or it is suspect again after a restart
             self._clear(device, "suspect_sensor")
             self._raise(device, None, None, "sensor_agrees", "info",
                         "This node agrees with the others again. Its temperature "

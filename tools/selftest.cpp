@@ -72,6 +72,67 @@ static void test_record() {
   CHECK(b.temp == -1875 && b.tempC() < -18.0, "-18.75 C reads back as -18.75 C");
 }
 
+// ── 2b. the v1 layout is frozen, and told apart by its length ────────────
+// docs/CRYPTO.md. The same record, as bytes, is in
+// backend/tests/test_record_format.py: if either side's encoder changes, one of
+// the two suites goes red.
+static void test_record_format() {
+  head("The v1 record format is frozen, and has no version byte");
+  static const char* golden =
+      "012023260700000080b9b56aadf8a3232f00093f00070e151c232a31383f464d545b"
+      "626970777e858c939aa1a8afb6bdc4cbd2d99b3d31af2a558f4021ac074f5f111202"
+      "114de7378ea36521c4f47f3e7dc97f32";
+  Record a;
+  a.device = 0x26232001; a.seq = 7; a.ts = 1790294400u;
+  a.temp = -1875; a.rh = 9123; a.c2h4 = 47; a.flags = FLAG_TAMPER | FLAG_COLD;
+  a.batt = 63;
+  for (int i = 0; i < 32; ++i) a.prev[i] = (uint8_t)(i * 7);
+  SoftSigner s("annachain-test-key-node-a-000000");
+  uint8_t d[32]; digest(a, d); s.sign(d, a.sig);
+  uint8_t raw[kRecBytes]; encode(a, raw);
+  std::string hex;
+  for (size_t i = 0; i < kRecBytes; ++i) {
+    char b[3]; std::snprintf(b, sizeof b, "%02x", raw[i]); hex += b;
+  }
+  CHECK(hex == golden, "a v1 record is byte for byte the one the server's tests hold");
+  CHECK(recordFormat(raw, kRecBytes) == kFormatV1, "84 bytes is v1, with no version byte");
+
+  a.device = 0x26232002;                    // node B: its first byte is 0x02
+  encode(a, raw);
+  CHECK(raw[0] == 2 && recordFormat(raw, kRecBytes) == kFormatV1,
+        "a v1 record whose first byte is 2 is still v1: length decides, not byte 0");
+
+  uint8_t v2[117] = {2};
+  CHECK(recordFormat(v2, sizeof v2) == 0, "a later format is not mistaken for v1");
+}
+
+// ── 2c. an invented value says it was invented ───────────────────────────
+// The board has no ethylene sensor. The simulator can invent a curve for one
+// (dump/fleet --ethylene), and the record must say so, inside the signature,
+// or no one downstream can tell a demonstration from a measurement.
+static void test_simulated_flag() {
+  head("Invented ethylene is flagged as simulated, inside the signature");
+  for (int fitted = 0; fitted < 2; ++fitted) {
+    SimClock clk{1790294400u}; SimSensors sns{2}; MemStore st{64};
+    SoftSigner sg; SimServer srv; SimLink ln{srv, sg};
+    sns.setEthyleneFitted(fitted == 1);
+    Node n{0x5001, clk, sns, st, ln, sg};
+    n.begin();
+    for (int i = 0; i < 5; ++i) { n.tick(); clk.advance(300); }
+    bool all = true, none = true;
+    for (uint32_t s = 1; s <= 5; ++s) {
+      uint8_t raw[kRecBytes]; st.read(s, raw);
+      Record r; decode(raw, r);
+      if (r.flags & FLAG_SIMULATED) none = false; else all = false;
+    }
+    if (fitted) CHECK(all, "--ethylene: every record carries FLAG_SIMULATED (bit 6)");
+    else        CHECK(none, "no ethylene: no record carries FLAG_SIMULATED");
+  }
+  CHECK(FLAG_SIMULATED == 0x40 && !(FLAG_SIMULATED & (FLAG_TAMPER | FLAG_MOVED |
+        FLAG_CHARGING | FLAG_COLD | FLAG_SELFTEST | FLAG_SENSORBAD)),
+        "bit 6, clear of the six flags already in use");
+}
+
 // ── a small rig, so each test starts clean ────────────────────────────────
 struct Rig {
   SimClock   clk{1758758400u};
@@ -552,10 +613,156 @@ static void test_gateway_cannot_forge() {
         "because the gateway has no key, and the signature no longer matches");
 }
 
+// ── 13. the node reconciles against the SERVER, through the gateway ──────
+// The gateway's hop-by-hop ack says "I have it", and the gateway's buffer is
+// RAM: a cab power cut loses it. A node that asks "what does the server have?"
+// must get the server's answer, relayed by the gateway — not the gateway's own
+// hop-by-hop ack (which hides the loss), and not zero (which resends the whole
+// flash over LoRa).
+struct RelayRig {
+  SimClock   clk{1758758400u};
+  SimRadio   radio;
+  SoftSigner signer{"relay-test-device-key"};
+  SimServer  srv;
+  SimLink    uplink{srv, signer};
+  GwBuffer*  gbuf = nullptr;
+  Gateway*   gw = nullptr;
+  SimSensors sns{6};
+  MemStore   mem{4096};
+  SimNodeToGateway* link = nullptr;
+  Node*      node = nullptr;
+
+  RelayRig() { powerGateway(); bootNode(); }
+  ~RelayRig() { delete node; delete link; delete gw; delete gbuf; }
+  // The cab loses power and comes back: a new gateway with an empty buffer.
+  void powerGateway() {
+    delete gw; delete gbuf;
+    gbuf = new GwBuffer(2000);
+    gw = new Gateway(0xAA0003, clk, radio, *gbuf, uplink);
+    gw->begin(); gw->setBatchSize(20);
+    if (link) link->attach(gw);
+  }
+  // The node reboots: a fresh radio driver and a fresh Node on the same flash.
+  void bootNode() {
+    delete node; delete link;
+    link = new SimNodeToGateway(radio);
+    link->attach(gw);
+    node = new Node(0x3001, clk, sns, mem, *link, signer);
+    node->setBatchSize(20); node->begin();
+  }
+  void tick(bool forward = true) {
+    node->tick(); gw->poll(); if (forward) gw->forward(); clk.advance(300);
+  }
+  // Keep going until the server has everything the node has, or give up.
+  bool settle(int ticks) {
+    for (int i = 0; i < ticks; ++i) {
+      tick();
+      if (srv.lastAck(0x3001) == mem.lastSeq()) return true;
+    }
+    return false;
+  }
+  bool serverInOrder() const {
+    const auto& db = srv.records();
+    for (size_t i = 0; i < db.size(); ++i) if (db[i].seq != i + 1) return false;
+    return true;
+  }
+};
+
+static void test_gateway_relays_server_ack() {
+  head("The node resumes from what the server has, relayed by the gateway");
+  RelayRig r;
+  for (int i = 0; i < 25; ++i) r.tick();
+  CHECK(r.srv.lastAck(0x3001) == 25, "25 records forwarded and acknowledged by the server");
+  r.uplink.setUp(false);
+  for (int i = 0; i < 15; ++i) r.tick(false);
+  CHECK(r.gw->buffered() == 15 && r.mem.loadAck() == 40,
+        "15 more wait in the gateway; the node holds hop-by-hop ack 40");
+
+  r.powerGateway();                        // the cab loses power: 26-40 are gone
+  r.uplink.setUp(true);
+  r.bootNode();                            // and the node reboots
+  size_t mark = r.radio.transmitted().size();
+  r.node->resync();
+  const auto& tx = r.radio.transmitted();
+  CHECK(tx.size() > mark && tx[mark].seq == 26, "after the reboot it resumes at record 26");
+  CHECK(tx.size() - mark == 15, "and resends exactly 26-40, not its whole flash");
+  r.gw->poll(); r.gw->forward();
+  CHECK(r.srv.lastAck(0x3001) == 40 && r.serverInOrder(),
+        "the server ends with 1-40, in order, nothing missing");
+}
+
+static void test_gateway_relay_no_value_yet() {
+  head("The gateway has no word from the server yet");
+  RelayRig r;
+  for (int i = 0; i < 25; ++i) r.tick();
+  r.uplink.setUp(false);
+  for (int i = 0; i < 15; ++i) r.tick(false);
+  r.powerGateway();                        // cab power cut, and still no signal
+  r.bootNode();
+  size_t mark = r.radio.transmitted().size();
+  r.node->resync();
+  CHECK(r.radio.transmitted().size() == mark,
+        "no answer is not zero: the node does not resend its whole flash");
+  CHECK(r.node->ackedSeq() == 40, "it keeps what it last knew, 40");
+  r.tick(false);
+  CHECK(r.radio.transmitted().size() == mark + 1 && r.radio.transmitted().back().seq == 41,
+        "and carries on with record 41");
+
+  r.uplink.setUp(true);                    // signal at the cab: now the gateway can ask
+  CHECK(r.settle(10), "once the gateway can ask the server, the node catches up");
+  CHECK(r.serverInOrder() && r.srv.held() == r.mem.lastSeq(),
+        "and the server holds every record, in order");
+}
+
+// ── 14. records the GATEWAY lost are recovered end to end ────────────────
+// The crate is in LoRa range, the cab has no signal for longer than the
+// gateway's buffer lasts: the gateway overwrites its oldest frames. The node
+// was acknowledged hop by hop, so on its own it would never resend them, and
+// the server would wait for the first missing record for ever. Counting the
+// loss at the gateway is not enough; an unsigned gateway counter is not
+// evidence. The node must be asked for them again, by the server's last-ACK.
+static void test_gateway_overrun_is_recovered() {
+  head("Records the gateway overwrote are resent, because the server says so");
+  SimClock   clk{1758758400u};
+  SimRadio   radio;
+  SoftSigner signer{"overrun-test-device-key"};
+  SimServer  srv;
+  SimLink    uplink{srv, signer};
+  GwBuffer   gbuf{40};                     // deliberately tiny
+  Gateway    gw{0xAA0004, clk, radio, gbuf, uplink};
+  gw.begin(); gw.setBatchSize(20);
+  SimSensors sns{8}; MemStore mem{4096};
+  SimNodeToGateway link{radio};
+  link.attach(&gw, true);                  // the gateway keeps running as the node sends
+  Node node{0x4001, clk, sns, mem, link, signer};
+  node.setBatchSize(20); node.begin();
+
+  uplink.setUp(false);                     // no signal at the cab
+  for (int i = 0; i < 100; ++i) { node.tick(); gw.poll(); clk.advance(300); }
+  CHECK(gw.stats().dropped == 60 && gw.buffered() == 40,
+        "the gateway overwrote 60 records it could not forward");
+  CHECK(srv.held() == 0 && mem.count() == 100, "the server has none; the node has all 100");
+
+  uplink.setUp(true);                      // signal returns
+  bool caughtUp = false;
+  for (int i = 0; i < 10 && !caughtUp; ++i) {
+    node.tick(); gw.poll(); gw.forward(); clk.advance(300);
+    caughtUp = srv.lastAck(0x4001) == mem.lastSeq();
+  }
+  CHECK(caughtUp, "the node resent what the gateway lost, and the server caught up");
+  bool inOrder = true;
+  for (size_t i = 0; i < srv.records().size(); ++i)
+    if (srv.records()[i].seq != i + 1) inOrder = false;
+  CHECK(inOrder && srv.held() == mem.lastSeq() && srv.gaps().empty(),
+        "every record, in order, and no hole declared or left undeclared");
+}
+
 int main() {
   std::printf("\n\033[1mAnnaChain self-tests\033[0m\n");
   test_sha256();
   test_record();
+  test_record_format();
+  test_simulated_flag();
   test_store_first();
   test_outage_gap_fill();
   test_link_dies_mid_catchup();
@@ -575,6 +782,9 @@ int main() {
   test_gateway_cannot_alter_gap();
   test_gateway_gap_overrun_is_counted();
   test_gateway_cannot_forge();
+  test_gateway_relays_server_ack();
+  test_gateway_relay_no_value_yet();
+  test_gateway_overrun_is_recovered();
 
   std::printf("\n%d checks, %d failed\n", checks, failures);
   std::printf("%s\n\n", failures ? "\033[31mSOMETHING IS WRONG\033[0m"

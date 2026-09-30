@@ -2,6 +2,8 @@
 
 **SIH 2026 · PS 26232 · Low-Cost IoT Blockchain Nodes for Farm-to-Fork Traceability · MoFPI · Hardware**
 
+[![tests](https://github.com/shrutikbalwan/AnnaChain/actions/workflows/tests.yml/badge.svg)](https://github.com/shrutikbalwan/AnnaChain/actions/workflows/tests.yml)
+
 The claim this project makes is one sentence long:
 
 > A reading is signed and written to flash **before** any radio is touched, so a
@@ -16,8 +18,8 @@ Everything in this repository exists to make that sentence demonstrable.
 You have not ordered parts yet. You do not need them to start.
 
 ```bash
-g++ -std=gnu++17 -DSH_LOG_CAPACITY=4096 -Ilib/ac lib/ac/*.cpp native/main.cpp -o sh
-./sh
+g++ -std=gnu++17 -DAC_LOG_CAPACITY=4096 -DAC_NATIVE=1 -Ilib/ac lib/ac/*.cpp native/main.cpp -o demo
+./demo
 ```
 
 or, with PlatformIO installed:
@@ -34,10 +36,10 @@ you can watch the chain break at exactly that record.
 **Run the tests too.** They are the deck's claims, written as assertions:
 
 ```bash
-g++ -std=gnu++17 -DSH_LOG_CAPACITY=4096 -Ilib/ac lib/ac/*.cpp tools/selftest.cpp -o t && ./t
+g++ -std=gnu++17 -DAC_LOG_CAPACITY=4096 -Ilib/ac lib/ac/*.cpp tools/selftest.cpp -o t && ./t
 ```
 
-92 checks, including a power cut in the middle of the outage, a link that dies
+113 checks, including a power cut in the middle of the outage, a link that dies
 mid-batch, a replayed record, an outage longer than the flash itself, gap notices
 crossing the truck gateway, and the gateway being unable to forge a record.
 
@@ -114,6 +116,10 @@ docs/VERIFY.md      A hostile checklist for proving the project actually
                     works. Paste it into a fresh AI session, or work
                     through it by hand.
 docs/DEMO.md        The 90 seconds you perform in front of a judge.
+docs/HIL.md         Arrival day, steps 0-6: what to run when each part lands,
+                    what it must print, and how it goes wrong.
+docs/BRINGUP.md     The irreversible steps (ATECC608 locking, NVS erase), the
+                    smoke-test format, the pin check, SX1262 troubleshooting.
 ```
 
 The node logic never sees a `Serial`, a `LittleFS` or a `Wire`. That is why the

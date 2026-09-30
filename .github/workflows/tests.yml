@@ -1,0 +1,27 @@
+# Both suites on every push and pull request: the firmware selftest (plain g++)
+# and the backend pytest suite. `make test` is exactly what runs on a laptop.
+#
+# On this runner there is no Playwright/Chrome, so the browser tests in
+# backend/tests/test_trace_page_browser.py skip (as one skipped module); the
+# gateway end-to-end test runs, because g++ is here. A skip is not a failure;
+# a failure is.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the backend's dependencies
+        run: python -m pip install -r backend/requirements-dev.txt
+      - name: make test (firmware selftest + backend suite)
+        run: make test PY=python
+      - name: make demo (must print DEMO PASSED)
+        run: make demo | tee demo.log && grep -q "DEMO PASSED" demo.log

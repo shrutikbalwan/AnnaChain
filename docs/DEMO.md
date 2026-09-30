@@ -15,7 +15,12 @@ nodes — and the dashboard will show all of it to the judges.
 make clean                  (or delete backend/annachain.db* and backend/ledger.jsonl)
 ```
 
-For the dashboard demo, make the capture right before replaying it. The trip
+One command does all of it: `mingw32-make demo-full` (clean, build, capture,
+serve, feed). If the compiler will not cooperate at the venue,
+`mingw32-make demo-seed` builds the same known-good database from a committed
+capture, re-timed to end now (see the Makefile for why that is honest).
+
+By hand: make the capture right before replaying it. The trip
 ends at the moment it is captured, and the server refuses readings older than a
 node could have held them. Leave out `--ethylene`: the board has no ethylene
 sensor, and the dashboard should show what the device actually does.

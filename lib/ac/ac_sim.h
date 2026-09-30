@@ -145,6 +145,12 @@ class SimRadio : public IGatewayRadio {
     acks_.push_back({device, seq});
     return true;
   }
+  bool lastAck(uint32_t device, bool known, uint32_t seq) override {
+    replies_.push_back({device, known, seq});
+    return true;
+  }
+  struct Reply { uint32_t device; bool known; uint32_t seq; };
+  const std::vector<Reply>& replies() const { return replies_; }
 
   // called by the node side
   void transmit(const uint8_t frame[kRecBytes], uint8_t kind = FRAME_RECORD);
@@ -155,10 +161,15 @@ class SimRadio : public IGatewayRadio {
 
   struct Ack { uint32_t device, seq; };
   const std::vector<Ack>& acks() const { return acks_; }
+  // Every record frame a node put on the air, (device, seq), in order — lost
+  // or not. For tests that need to know what a node chose to (re)send.
+  const std::vector<Ack>& transmitted() const { return sent_; }
 
  private:
   std::vector<std::vector<uint8_t>> q_;     // kind byte, then the frame
   std::vector<Ack> acks_;
+  std::vector<Ack> sent_;
+  std::vector<Reply> replies_;
   int loss_ = 0;
   uint32_t lost_ = 0, rnd_ = 99;
   int16_t rssi_ = -92;
@@ -166,23 +177,31 @@ class SimRadio : public IGatewayRadio {
 
 // An ILink that hands a node's records to a SimRadio instead of to a server,
 // so a node can be wired to a gateway exactly as it would be on a truck.
+//
+// attach(gateway) makes it behave like LoraNodeLink: queryLastAck() puts a
+// FRAME_QUERY on the air and returns the gateway's answer, which is the
+// server's last-ACK (ac_gateway.h), or false for "no value". Unattached, it
+// answers with its own hop-by-hop ack, which is how nodes behaved before the
+// gateway relayed the server's answer; the older gateway tests use it that way.
+// gatewayRuns = true also lets the gateway poll and forward after every batch
+// the node sends, as the real gateway's loop does while a node is transmitting
+// one frame at a time.
 class SimNodeToGateway : public ILink {
  public:
   explicit SimNodeToGateway(SimRadio& r) : radio_(r) {}
   bool up() override { return up_; }
-  bool queryLastAck(uint32_t, uint32_t& lastAck) override {
-    if (!up_) return false;
-    lastAck = ack_;
-    return true;
-  }
+  bool queryLastAck(uint32_t device, uint32_t& lastAck) override;
   bool send(const uint8_t* recs, size_t count, uint32_t& acked) override;
   // The signed notice goes over LoRa like a record, and the gateway carries
   // it upstream in its place in the queue.
   bool declareGap(uint32_t device, uint32_t from, uint32_t to,
                   const uint8_t mac[32]) override;
   void setUp(bool u) { up_ = u; }
+  void attach(Gateway* gw, bool gatewayRuns = false) { gw_ = gw; runs_ = gatewayRuns; }
  private:
   SimRadio& radio_;
+  Gateway* gw_ = nullptr;
+  bool runs_ = false;
   bool up_ = true;
   uint32_t ack_ = 0;
 };

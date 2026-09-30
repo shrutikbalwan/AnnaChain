@@ -1,9 +1,9 @@
 // AnnaChain — the gateway's way out: Wi-Fi to the server, and NTP for time.
 //
 // ╔══════════════════════════════════════════════════════════════════════════╗
-// ║ UNPROVEN. This compiles against the ESP32 Arduino core. It has never     ║
-// ║ joined a network or reached the server from a board: none has arrived.   ║
-// ║ docs/HIL.md step 6.                                                      ║
+// ║ UNPROVEN. This compiles against the ESP32 Arduino core (env gateway, 30  ║
+// ║ Sep 2026). It has never joined a network or reached the server from a    ║
+// ║ board: none has arrived. docs/HIL.md step 6.                             ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // WifiHttpLink replaces SerialLink on the gateway. It speaks the same HTTP API

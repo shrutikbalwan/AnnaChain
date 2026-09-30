@@ -92,14 +92,18 @@ g++ -std=c++17 -Wall -DAC_LOG_CAPACITY=4096 -Ilib/ac $CORE tools/selftest.cpp -o
 ./selftest
 ```
 
-**Expected:** `92 checks, 0 failed` and `ALL GOOD`. (70 originally; 8 were
-added for the signed gap notice and the clock base, and 14 for gap notices
-crossing the truck gateway.)
+**Expected:** `113 checks, 0 failed` and `ALL GOOD`. (70 originally; 8 were
+added for the signed gap notice and the clock base, 14 for gap notices
+crossing the truck gateway, 4 for the frozen v1 record format, 10 for the
+gateway relaying the server's last-ACK, 4 for records the gateway lost
+being resent, and 3 for the simulated-value flag.)
 
 Read the section names as they scroll. They must include, and all pass:
 
 - SHA-256 against the published vectors *(if this fails, nothing else means anything)*
 - Record encoding — including a sub-zero temperature surviving as signed
+- The v1 record format is frozen, and has no version byte
+- Invented ethylene is flagged as simulated, inside the signature
 - Store first, transmit second — **C1**
 - 29 hours dark, then catch up — **C2**
 - The link dies in the middle of the catch-up
@@ -110,11 +114,14 @@ Read the section names as they scroll. They must include, and all pass:
 - A gap notice is signed by the device — **C4**, **C6**
 - The board's clock starts on the date it claims
 - The sensor stops answering
-- Nine gateway sections, including **"A declared gap crosses the gateway"**,
+- Twelve gateway sections, including **"A declared gap crosses the gateway"**,
   **"The gateway cannot alter a gap notice"** and **"A gap notice lost to gateway
-  overrun is counted"**, ending with **"The gateway cannot make a record up"** — **C4**, **C6**
+  overrun is counted"**, **"The gateway cannot make a record up"**, **"The node
+  resumes from what the server has, relayed by the gateway"** and **"The gateway
+  has no word from the server yet"** and **"Records the gateway overwrote are
+  resent, because the server says so"** — **C2**, **C4**, **C6**
 
-**FAIL if:** the count is below 92, anything is red, or a section above is missing.
+**FAIL if:** the count is below 113, anything is red, or a section above is missing.
 
 Then the server's own suite:
 
@@ -123,7 +130,7 @@ python3 -m pip install -r backend/requirements-dev.txt
 python3 -m pytest backend/tests -q
 ```
 
-**Expected:** every test passes (124 at the time of writing; the browser
+**Expected:** every test passes (129 at the time of writing; the browser
 tests skip on a machine without Chrome or Playwright, and the gateway
 end-to-end test skips without a C++ compiler). **FAIL if** any test
 fails, or `backend/tests/` is missing.
@@ -312,9 +319,9 @@ Reporting them as bugs is a false positive.
 | Signatures are **HMAC, not ECDSA** | The ATECC608B is not fitted yet. The interface is already the secure element's |
 | The ledger is **local, not distributed** | `ledger.py` has a real hash-linked ledger and a Fabric adapter that reports itself unavailable. Every anchor returns `"distributed": false` |
 | **SQLite, not PostgreSQL + TimescaleDB** | Schema is written for the move; `records` is the hypertable candidate |
-| **No ethylene sensor is read** | The field transmits *not fitted*. The part has not been chosen, on purpose |
+| **No ethylene sensor is read** | The field transmits *not fitted*. The part has not been chosen, on purpose. A capture made with `--ethylene` carries invented values, and every such record says so (`FLAG_SIMULATED`, badged SIMULATED on both pages) |
 | Shelf-life parameters are **not validated** | Literature-typical Q10 values. Every response carries the caveat |
-| `LoraRadio` **receives nothing** | Stub until the SX1262 arrives. The gateway logic above it is fully tested |
+| The SX1262, PN532, ATECC608B and Wi-Fi/NTP drivers are **UNPROVEN** | Written, compiled for the board (every `pio run` environment builds), never run on a part: none has arrived (`docs/HIL.md`). The gateway and node logic above them is tested in the simulator |
 | The clock starts from a **compiled-in date** | No NTP or RTC yet; the server's timestamp check is what catches a wrong one |
 | A calibration **registry** does not exist | The check works; there are no real certificates to put in it yet |
 
@@ -425,13 +432,14 @@ half-done, which is worse than absent. `backend/README.md` lists each one, and
 the other remaining limitations, under *Honest about what this is not*.
 
 1. No running Fabric network (adapter only).
-2. A buyer's phone cannot check a signature until the ATECC608B makes it ECDSA.
-3. Records the *gateway* drops on its own overrun are counted there but not
-   declared to the server.
+2. A buyer's phone cannot check a signature until the ATECC608B makes it ECDSA
+   (a record-format change, decided against for now: `docs/CRYPTO.md`).
 
 Done since the first verification, and no longer to be reported as missing:
 backend tests, login back-off, vendored Chart.js, gap notices through the
-gateway.
+gateway, and records the *gateway* loses to its own overrun or a power cut
+(the node is told the server's last-ACK and resends them; selftest sections
+13 and 14).
 
 ---
 
@@ -440,7 +448,7 @@ gateway.
 | Component | Pass / Fail | Evidence |
 |---|---|---|
 | Build, no warnings | | |
-| 78 firmware tests | | |
+| 113 firmware checks | | |
 | Backend test suite | | |
 | C1 store before transmit | | |
 | C2 outage recovery | | |

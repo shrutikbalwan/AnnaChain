@@ -1,8 +1,9 @@
 // AnnaChain — the PN532 NFC reader: who took custody of this crate, and when.
 //
 // ╔══════════════════════════════════════════════════════════════════════════╗
-// ║ UNPROVEN. This compiles against the Adafruit PN532 library. It has never ║
-// ║ read a tag: no PN532 has arrived. docs/HIL.md step 3.                    ║
+// ║ UNPROVEN. This compiles against Adafruit PN532 1.3.4 (envs node_lora,    ║
+// ║ smoke, 30 Sep 2026). It has never read a tag: no PN532 has arrived.      ║
+// ║ docs/HIL.md step 3.                                                      ║
 // ╚══════════════════════════════════════════════════════════════════════════╝
 //
 // Two uses, one mechanism: a tap is a tag UID seen at a moment.
@@ -13,9 +14,11 @@
 //     T <device> <assign|tap> <uid-hex> <unix-time>
 // and backend/bridge_serial.py turns it into a checkpoint on the server.
 //
-// Not yet done, and said plainly: a tap is not signed and is not in the hash
-// chain. It is a logged claim, weaker than a reading. Over LoRa it is not
-// carried at all yet. Both are named in backend/README.md.
+// Not done, and said plainly: a tap is not signed and is not in the hash
+// chain. It is a logged claim, weaker than a reading. It is NOT carried over
+// LoRa (there is no FRAME_TAP): handover is the USB-tethered configuration,
+// the node's USB port connected to bridge_serial.py. Both are named in
+// backend/README.md.
 //
 // Wiring: I2C mode, on the shared bus with the SHT40 (PN532 7-bit address
 // 0x24). Most PN532 boards select the interface with two DIP switches or

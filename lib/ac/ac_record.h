@@ -24,6 +24,17 @@ namespace ac {
 constexpr size_t kBodyBytes = 52;
 constexpr size_t kRecBytes  = 84;
 
+// The format version (docs/CRYPTO.md). The layout above is v1, and it has no
+// version byte: every node, capture and database already holds these 84 bytes
+// as evidence, so v1 is identified by its LENGTH, never by its first byte (the
+// low byte of the device id, which can be anything). Every later format starts
+// with a version byte of 2 or more, covered by its signature, and has a fixed
+// length of its own that is never 84. Nothing here produces a later format.
+constexpr uint8_t kFormatV1 = 1;
+
+// The format of `len` bytes: kFormatV1, or 0 for a format this code does not know.
+uint8_t recordFormat(const uint8_t* raw, size_t len);
+
 enum Flags : uint8_t {
   FLAG_TAMPER   = 1 << 0,  // enclosure opened
   FLAG_MOVED    = 1 << 1,  // accelerometer above threshold
@@ -31,6 +42,11 @@ enum Flags : uint8_t {
   FLAG_COLD     = 1 << 3,  // below 0 C — charging inhibited
   FLAG_SELFTEST  = 1 << 4,  // first record after power-up
   FLAG_SENSORBAD = 1 << 5,  // the sensor did not answer — this reading is not a measurement
+  // A value in this record was invented by the simulator, not measured. Today
+  // that means only the ethylene curve SimSensors makes up when told a sensor is
+  // fitted (dump/fleet --ethylene); the board has none. Mock temperatures
+  // (node_mock, dump, fleet) do NOT set it. Inside the signature, like every flag.
+  FLAG_SIMULATED = 1 << 6,
 };
 
 constexpr uint16_t kEthyleneNotFitted = 0xFFFF;
@@ -70,7 +86,9 @@ void gapDigest(uint32_t device, uint32_t from, uint32_t to, uint8_t out[32]);
 // What travels over LoRa. A frame is always kRecBytes long so the gateway can
 // buffer records and gap notices in one queue, in the order they must reach the
 // server. The kind travels beside the frame, never inside a record.
-enum FrameKind : uint8_t { FRAME_RECORD = 0, FRAME_GAP = 1 };
+// FRAME_QUERY is a node asking the gateway what the SERVER holds for it
+// (device 4, then zeros); the answer goes back over the radio, never in a record.
+enum FrameKind : uint8_t { FRAME_RECORD = 0, FRAME_GAP = 1, FRAME_QUERY = 2 };
 
 // A gap notice as a frame, little-endian:
 //   device 4 | from 4 | to 4 | mac 32 | zero 40

@@ -91,6 +91,7 @@ static int viaGateway(int online1, int dark, bool ethylene, long start) {
   DumpLink   up;                       // the gateway's uplink: this is what gets printed
   Gateway    gw(0xAA000001, clk, radio, gbuf, up);
   SimNodeToGateway lora(radio);
+  lora.attach(&gw);                    // the node asks the gateway what the server has
   Node node(0x26232001, clk, sns, store, lora, signer);
   gw.begin(); gw.setBatchSize(20);
   node.setBatchSize(20); node.begin();
@@ -186,7 +187,8 @@ int main(int argc, char** argv) {
   std::fprintf(stderr, "dumped %u records (%d online, %d through the outage)\n",
                node.stats().stored, online1, dark);
   std::fprintf(stderr, ethylene
-      ? "ethylene: SIMULATED (--ethylene). The board has no ethylene sensor.\n"
+      ? "ethylene: SIMULATED (--ethylene), and flagged so in every record (FLAG_SIMULATED).\n"
+        "The board has no ethylene sensor.\n"
       : "ethylene: not fitted, as on the real board\n");
   return 0;
 }

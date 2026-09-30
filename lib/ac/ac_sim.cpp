@@ -39,6 +39,7 @@ Reading SimSensors::read() {
     double ppb = 20.0 + c2h4Acc_;
     if (ppb > 65535) ppb = 65535;
     v.c2h4 = (uint16_t)ppb;
+    v.simulated = true;              // there is no such sensor: say so, in the record
   } else {
     v.c2h4 = kEthyleneNotFitted;
   }
@@ -187,6 +188,11 @@ bool SimLink::declareGap(uint32_t device, uint32_t from, uint32_t to,
 
 // ── SimRadio ──────────────────────────────────────────────────────────────
 void SimRadio::transmit(const uint8_t frame[kRecBytes], uint8_t kind) {
+  if (kind == FRAME_RECORD) {
+    const uint8_t* p = frame;
+    sent_.push_back({(uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24,
+                     (uint32_t)p[4] | (uint32_t)p[5] << 8 | (uint32_t)p[6] << 16 | (uint32_t)p[7] << 24});
+  }
   if (loss_ > 0) {
     rnd_ = rnd_ * 1103515245u + 12345u;
     if ((int)((rnd_ >> 16) % 100) < loss_) { lost_++; return; }   // packet lost
@@ -207,9 +213,30 @@ bool SimRadio::receive(uint8_t frame[kRecBytes], uint8_t& kind, int16_t& rssi) {
 }
 
 // ── SimNodeToGateway ──────────────────────────────────────────────────────
+bool SimNodeToGateway::queryLastAck(uint32_t device, uint32_t& lastAck) {
+  if (!up_) return false;
+  if (!gw_) { lastAck = ack_; return true; }     // a node that never asks (see ac_sim.h)
+
+  uint8_t q[kRecBytes] = {0};
+  q[0] = (uint8_t)device; q[1] = (uint8_t)(device >> 8);
+  q[2] = (uint8_t)(device >> 16); q[3] = (uint8_t)(device >> 24);
+  size_t before = radio_.replies().size();
+  radio_.transmit(q, FRAME_QUERY);
+  gw_->poll();                                   // the gateway hears it, in order
+  const auto& rs = radio_.replies();
+  for (size_t i = before; i < rs.size(); ++i) {
+    if (rs[i].device != device) continue;
+    if (!rs[i].known) return false;              // no value: keep what we know
+    lastAck = rs[i].seq;
+    return true;
+  }
+  return false;                                  // the query or its answer was lost
+}
+
 bool SimNodeToGateway::send(const uint8_t* recs, size_t count, uint32_t& acked) {
   if (!up_) return false;
   for (size_t i = 0; i < count; ++i) radio_.transmit(recs + i * kRecBytes);
+  if (gw_ && runs_) { gw_->poll(); gw_->forward(); }
 
   // The gateway acknowledges hop-by-hop, so from the node's point of view a
   // record handed to the radio is delivered. If the packet was actually lost in

@@ -382,9 +382,7 @@ function draw(s){
     chartE.data.labels = labels;
     chartE.data.datasets[0].data = s.series.map(p => p.e);
     chartE.update('none');
-    $('e-note').textContent = hasE
-      ? 'Ethylene as this node reported it. The current board has no ethylene sensor, so on today\'s hardware these values can only come from the simulator run with --ethylene: treat them as a demonstration, not a measurement.'
-      : 'No ethylene sensor fitted on this node. The field is transmitted as “not fitted” rather than as a zero.';
+    eNote(s.series, 'No ethylene sensor fitted on this node. The field is transmitted as “not fitted” rather than as a zero.');
   }
 
   // alerts
@@ -694,9 +692,25 @@ function line(cv, pts, lo, hi, unit, colourLate){
 function drawPlain(s, lo, hi){
   line($('chartT'), s.series.map(p => ({v:p.t, late:p.lag > 0})), lo, hi, '\u00b0C', true);
   line($('chartE'), s.series.map(p => ({v:p.e})), null, null, 'ppb', false);
-  $('e-note').textContent = s.series.some(p => p.e !== null)
-    ? 'Ethylene as this node reported it. The current board has no ethylene sensor, so on today\'s hardware these values can only come from the simulator run with --ethylene: treat them as a demonstration, not a measurement.'
-    : 'No ethylene sensor fitted on this node.';
+  eNote(s.series, 'No ethylene sensor fitted on this node.');
+}
+
+// The note under the ethylene chart. Readings the device itself flagged as
+// simulated (FLAG_SIMULATED, bit 6) get a badge and a count: that flag is
+// inside the signature, so it is the device saying so, not this page guessing.
+function eNote(series, none){
+  const el = $('e-note');
+  const sim = series.filter(p => p.sim).length;
+  if (sim) {
+    el.innerHTML = '<span class="badge">SIMULATED</span> ' + sim + ' of ' + series.length +
+      ' readings carry an ethylene value the simulator invented, and say so in the' +
+      ' signed record. There is no ethylene sensor on this node: this is a demonstration,' +
+      ' not a measurement.';
+  } else if (series.some(p => p.e !== null)) {
+    el.textContent = 'Ethylene as this node reported it. The current board has no ethylene sensor, so on today\'s hardware these values can only come from the simulator run with --ethylene: treat them as a demonstration, not a measurement.';
+  } else {
+    el.textContent = none;
+  }
 }
 
 (async () => {

@@ -45,6 +45,7 @@ async def lifespan(app):
         verifier.load(d["device_id"], d["last_ack"], d["tip_digest"], d["anchor_next"],
                       d["last_ts"])
     throttle.load()
+    engine.load()
     if db.user_count() == 0:
         # First run: one operator account, so the dashboard is never open by
         # accident. The password is printed once and only once.
@@ -75,6 +76,14 @@ recovering = {}              # device -> how long the silence was, while drainin
 
 
 CAL_DEFAULT_MONTHS = 12          # EN 13486 verification interval
+MONTH_S = 2629800                # a mean month, 30.44 days
+
+
+def cal_due(d):
+    """When this device's calibration had to be renewed, or None if none is recorded."""
+    if not d or not d["cal_date"]:
+        return None
+    return d["cal_date"] + (d["cal_months"] or CAL_DEFAULT_MONTHS) * MONTH_S
 chain = ledger.get_ledger()      # Fabric if it is really there, else local
 
 
@@ -221,6 +230,35 @@ def register(reg: Registration, who: str = Depends(operator)):
     return {"ok": True, "device": reg.device, "last_ack": d["last_ack"]}
 
 
+# ── calibration (check 7): an operator action ───────────────────────────
+class Calibration(BaseModel):
+    cal_date: float                  # unix time the sensor was last verified
+    months: int = CAL_DEFAULT_MONTHS # EN 13486 verification interval
+    ref: str | None = None           # who verified it, against what reference
+
+
+@app.post("/api/calibration/{device}")
+def set_calibration(device: int, cal: Calibration, who: str = Depends(operator)):
+    """Record a sensor's last verification (EN 13486). Readings taken after it
+    lapses are still stored, raise a `calibration` alert and are marked
+    `uncertified`. Audited: who recorded which date against which reference."""
+    d = db.device(device)
+    if not d:
+        raise HTTPException(404, "unknown device")
+    if not 1 <= cal.months <= 60:
+        raise HTTPException(400, "months must be between 1 and 60")
+    if cal.cal_date > time.time() + 86400:
+        raise HTTPException(400, "a calibration cannot be dated in the future")
+    db.set_calibration(device, cal.cal_date, cal.months, cal.ref)
+    db.audit(who, "calibration", device,
+             f"verified {time.strftime('%Y-%m-%d', time.gmtime(cal.cal_date))}, "
+             f"interval {cal.months} months, ref: {cal.ref or '(none given)'}")
+    due = cal_due(db.device(device))
+    return {"ok": True, "device": device, "cal_date": cal.cal_date,
+            "months": cal.months, "ref": cal.ref, "due": due,
+            "lapsed": due < time.time()}
+
+
 # ── the node's calls ─────────────────────────────────────────────────────
 
 
@@ -267,9 +305,9 @@ def ingest(body: Ingest):
             rejected += 1
             first_reason = first_reason or "not a record"
             continue
-        if len(raw) != checks.REC:
+        if checks.record_format(raw) != checks.FORMAT_V1:
             rejected += 1
-            first_reason = first_reason or f"wrong length ({len(raw)} bytes)"
+            first_reason = first_reason or checks.format_refusal(raw)
             continue
 
         r = checks.parse(raw)
@@ -281,10 +319,8 @@ def ingest(body: Ingest):
             "SELECT 1 FROM records WHERE device_id=? AND seq=?", (dev, r["seq"])
         ).fetchone())
 
-        cal_due = None
-        if d and d["cal_date"]:
-            cal_due = d["cal_date"] + (d["cal_months"] or CAL_DEFAULT_MONTHS) * 2629800
-        ok, parsed, digest, reason = verifier.check(raw, key, seen, cal_due, now=now)
+        due = cal_due(d)
+        ok, parsed, digest, reason = verifier.check(raw, key, seen, due, now=now)
         if not ok:
             rejected += 1
             first_reason = first_reason or reason
@@ -300,10 +336,11 @@ def ingest(body: Ingest):
         parsed["received"] = now
         parsed["lag_s"] = lag
         parsed["stale_calibration"] = dev in verifier.stale_calibration
+        parsed["uncertified"] = int(parsed["stale_calibration"])   # stored with it
         db.insert_record(parsed)
         engine.on_record(parsed, ship)
         if parsed["stale_calibration"]:
-            engine.on_stale_calibration(dev, d["cal_date"], cal_due)
+            engine.on_stale_calibration(dev, d["cal_date"], due)
         touched[dev] = max(touched.get(dev, 0), parsed["ts"])
         accepted += 1
 
@@ -415,7 +452,7 @@ def truck_view(truck: str, who: str = Depends(operator)):
 def state(device: int | None = None, who: str = Depends(operator)):
     devs = db.devices()
     if not devs:
-        return {"devices": [], "waiting": True}
+        return {"devices": [], "waiting": True, "max_hold_s": checks.MAX_HOLD_S}
 
     if device is None:
         device = devs[0]["device_id"]
@@ -451,6 +488,8 @@ def state(device: int | None = None, who: str = Depends(operator)):
         "h": None if (r["flags"] & checks.FLAG_SENSORBAD) else r["rh_pct"],
         "e": r["c2h4_ppb"], "b": r["batt_pct"],
         "lag": r["lag_s"], "f": r["flags"],
+        "u": bool(r["uncertified"]),      # check 7: calibration had lapsed
+        "sim": bool(r["flags"] & checks.FLAG_SIMULATED),   # an invented value
     } for r in rows]
 
     recovered = db.conn().execute(
@@ -470,12 +509,16 @@ def state(device: int | None = None, who: str = Depends(operator)):
         "last_seq": d["last_ack"],
         "recovered": recovered,
         "declared_lost": lost,
+        "simulated": sum(1 for p in series if p["sim"]),
         "series": series,
         "alerts": [dict(a) for a in db.alerts(30, device_id=device)],
         "rejects": [dict(x) for x in db.rejects(10)],
         "truck_alerts": [dict(a) for a in db.alerts(12)],
         "anchors": [dict(a) for a in db.anchors(device, 5)],
         "devices": [{"id": x["device_id"], "label": x["label"]} for x in devs],
+        # Read-only: how old a reading may be before check 5 refuses it. Tools
+        # (feed_sim.py) read it here rather than keep a second copy of it.
+        "max_hold_s": checks.MAX_HOLD_S,
     }
 
 
@@ -870,6 +913,7 @@ def trace(shipment_id: str):
         "limit_lo": lo, "limit_hi": hi,
         "minutes_out": len(out_of_range) * step_s // 60,
         "sensor_faults": len(rows) - len(good),
+        "simulated_readings": sum(1 for r in rows if r["flags"] & checks.FLAG_SIMULATED),
         "declared_lost": lost,
         "gaps": [{"from": g["from_seq"], "to": g["to_seq"]} for g in gaps],
         "chain_ok": v["ok"],
@@ -881,7 +925,8 @@ def trace(shipment_id: str):
         "nodes_on_truck": len(truck_nodes),
         "series": [{"seq": r["seq"], "ts": r["ts"],
                     "t": None if (r["flags"] & checks.FLAG_SENSORBAD) else r["temp_c"],
-                    "late": r["lag_s"] > 0} for r in rows],
+                    "late": r["lag_s"] > 0,
+                    "sim": bool(r["flags"] & checks.FLAG_SIMULATED)} for r in rows],
     }
 
 
@@ -981,7 +1026,7 @@ def reset(who: str = Depends(operator)):
     """Wipe everything, for a clean demo run."""
     db.init(reset=True)
     verifier.__init__()
-    engine.state.clear()
+    engine.__init__(db)        # suspects and truck run-lengths too, not only per-device state
     last_ingest_at.clear(); last_batch_n.clear()
     silence_start.clear(); recovering.clear(); _diagnosed.clear()
     return {"ok": True}

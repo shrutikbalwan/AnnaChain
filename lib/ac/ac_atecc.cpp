@@ -1,4 +1,5 @@
-// UNPROVEN — compiles; never run against an ATECC608B. See ac_atecc.h.
+// UNPROVEN — compiles (env smoke); never run against an ATECC608B.
+// See ac_atecc.h.
 #ifdef ARDUINO
 #include "ac_atecc.h"
 
