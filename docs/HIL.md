@@ -5,8 +5,10 @@ Seven steps, numbered 0 to 6. The numbers are fixed: the UNPROVEN banners in
 `src/smoke.cpp`, `src/main.cpp`, `src/gateway.cpp` and `platformio.ini` point at
 them. Do not renumber.
 
-**What is true before step 0.** No ESP32 environment in `platformio.ini`
-(`node_mock`, `node`, `node_lora`, `gateway`, `smoke`) has been compiled and then
+**What is true before step 0.** Every environment in `platformio.ini`
+(`native`, `node_mock`, `node`, `node_lora`, `gateway`, `smoke`) compiles — first
+checked on 30 Sep 2026 with PlatformIO Core 6.2.0, espressif32 7.1.3, RadioLib
+7.8.1, Adafruit PN532 1.3.4, ArduinoECCX08 1.4.1, Adafruit SHT4x 1.0.5. None has
 run on a board. The SX1262, PN532, ATECC608B and Wi-Fi/NTP drivers have never met
 their parts. Everything below is a procedure for finding out, not a description
 of something that works. When a step passes, paste its real output under it,
@@ -91,9 +93,10 @@ part that is not fitted yet is a pass for step 0. A missing line is not.
 
 **How it goes wrong**
 
-1. **It does not compile.** No ESP32 environment had been compiled when this
-   file was written. A compile error here is a finding: record the first error,
-   fix only that, and do not change behaviour to make it build.
+1. **It does not compile on the arrival-day laptop**, though it compiled on 30
+   Sep 2026. The library versions are ranges (`^`) in `platformio.ini`: a newer
+   RadioLib or ArduinoECCX08 can break the build. Pin the versions listed at the
+   top of this file and try again before changing any code.
 2. **`BOARD FAIL … PSRAM 0 MB (expected 16 MB / 8 MB for an N16R8)`**, or the
    board boot-loops. The N16R8's PSRAM is **octal** and occupies **GPIO33–37**.
    `platformio.ini` sets `board_build.arduino.memory_type = qio_opi` for that;

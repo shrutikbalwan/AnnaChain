@@ -1,4 +1,4 @@
-// UNPROVEN — never compiled for the board; never run against an SX1262.
+// UNPROVEN — compiles (envs node_lora, gateway, smoke); never run against an SX1262.
 // See ac_lora.h.
 #ifdef ARDUINO
 #include "ac_lora.h"

@@ -13,8 +13,8 @@
 // exactly as the node signed them.
 //
 // The drivers under this file are UNPROVEN: the SX1262 (lib/ac/ac_lora.*), and
-// Wi-Fi + NTP (lib/ac/ac_net.*). This environment has never been compiled, and
-// none of it has run on a board, because no board has arrived. docs/HIL.md
+// Wi-Fi + NTP (lib/ac/ac_net.*). This environment compiles (30 Sep 2026); none of
+// it has run on a board, because no board has arrived. docs/HIL.md
 // steps 5 and 6 are how that changes.
 //
 // Uplink: Wi-Fi to the server's HTTP API when AC_WIFI_SSID was set at build

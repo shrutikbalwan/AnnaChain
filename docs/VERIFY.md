@@ -321,7 +321,7 @@ Reporting them as bugs is a false positive.
 | **SQLite, not PostgreSQL + TimescaleDB** | Schema is written for the move; `records` is the hypertable candidate |
 | **No ethylene sensor is read** | The field transmits *not fitted*. The part has not been chosen, on purpose. A capture made with `--ethylene` carries invented values, and every such record says so (`FLAG_SIMULATED`, badged SIMULATED on both pages) |
 | Shelf-life parameters are **not validated** | Literature-typical Q10 values. Every response carries the caveat |
-| The SX1262, PN532, ATECC608B and Wi-Fi/NTP drivers are **UNPROVEN** | Written, never compiled for the board, never run on a part: none has arrived (`docs/HIL.md`). The gateway and node logic above them is tested in the simulator |
+| The SX1262, PN532, ATECC608B and Wi-Fi/NTP drivers are **UNPROVEN** | Written, compiled for the board (every `pio run` environment builds), never run on a part: none has arrived (`docs/HIL.md`). The gateway and node logic above them is tested in the simulator |
 | The clock starts from a **compiled-in date** | No NTP or RTC yet; the server's timestamp check is what catches a wrong one |
 | A calibration **registry** does not exist | The check works; there are no real certificates to put in it yet |
 
