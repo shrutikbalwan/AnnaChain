@@ -365,15 +365,15 @@ static void test_clock_base() {
   civil(buildTime(__DATE__, "00:00:00"), y, m, d);
   CHECK((unsigned)y == clockbase::year(__DATE__) && m == clockbase::month(__DATE__) &&
         d == clockbase::day(__DATE__), "the compiler's own date round-trips");
-  long now = (long)time(nullptr);
+  long long now = (long long)time(nullptr);   // not long: 32 bits on Windows until 2038
 #ifdef AC_CLOCK_BASE
   CHECK(kClockBase == (uint32_t)(AC_CLOCK_BASE), "AC_CLOCK_BASE overrides the build time exactly");
   (void)now;
 #else
   // Local build time minus 14 h: never ahead of UTC, at most 26 h behind it,
   // plus an hour for the time between compiling this and running it.
-  CHECK((long)kClockBase <= now, "kClockBase is not ahead of this machine's clock");
-  CHECK(now - (long)kClockBase <= 27L * 3600,
+  CHECK((long long)kClockBase <= now, "kClockBase is not ahead of this machine's clock");
+  CHECK(now - (long long)kClockBase <= 27LL * 3600,
         "and not more than 27 h behind it (zone margin 26 h + 1 h to run)");
 #endif
   CHECK(FLAG_TIMEUNSET == 0x80 && !(FLAG_TIMEUNSET & (FLAG_TAMPER | FLAG_MOVED | FLAG_CHARGING |

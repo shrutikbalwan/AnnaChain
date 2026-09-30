@@ -108,7 +108,7 @@ class Server:
         if seq != have + 1:
             return self.no(r, f"sequence gap (expected {have + 1})")
         # 5 — is the timestamp sensible?
-        if not (1600000000 < r["ts"] < 2200000000):
+        if not (1600000000 < r["ts"] <= 0xFFFFFFFF):   # not 2.2e9: that is Sep 2039
             return self.no(r, "impossible timestamp")
         # 6 — is the hash chain unbroken?
         tip = self.tip.get(d)

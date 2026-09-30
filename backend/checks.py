@@ -199,7 +199,12 @@ class Verifier:
         if unset and dev in self.clock_set:
             return False, r, d, ("inconsistent: this device's clock has already been "
                                  "set, but this record says it was not (FLAG_TIMEUNSET)")
-        if not (1600000000 < ts < 2200000000):
+        # The lower bound is before this project existed. There is no upper
+        # bound but the format's (uint32, Feb 2106): until 1 Oct 2026 it was
+        # 2,200,000,000, which is 18 Sep 2039, after which every record would
+        # have been "impossible". A future timestamp is refused just below,
+        # by 60 s, which is the rule that matters.
+        if not (1600000000 < ts <= 0xFFFFFFFF):
             return False, r, d, "impossible timestamp"
         if ts > now + MAX_SKEW_S:
             return False, r, d, (f"timestamp ahead of the server clock by "

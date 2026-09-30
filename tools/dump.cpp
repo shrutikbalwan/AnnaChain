@@ -65,7 +65,7 @@ class DumpLink : public ILink {
 // Where the simulated trip starts. By default it ends at the moment the capture
 // is made, because the server refuses readings older than a node could have
 // held them (backend/checks.py, check 5). --start pins it for a reproducible run.
-static uint32_t tripStart(long explicitStart, int readings) {
+static uint32_t tripStart(long long explicitStart, int readings) {
   if (explicitStart > 0) return (uint32_t)explicitStart;
   uint32_t now = (uint32_t)time(nullptr);
   uint32_t start = now - (uint32_t)readings * 300u;
@@ -79,7 +79,7 @@ static void printKey() {
 }
 
 // The real data path: the node never talks to the server, only to the gateway.
-static int viaGateway(int online1, int dark, bool ethylene, long start) {
+static int viaGateway(int online1, int dark, bool ethylene, long long start) {
   const int hold = 12;                 // readings the cab stays dark after the crate is back
   SimClock   clk(tripStart(start, online1 + dark + hold));
   SimSensors sns(7);
@@ -131,12 +131,12 @@ static int viaGateway(int online1, int dark, bool ethylene, long start) {
 int main(int argc, char** argv) {
   int online1 = 1000, dark = 350;
   bool ethylene = false, gateway = false;
-  long start = 0;
+  long long start = 0;   // not long: 32 bits on Windows, full in Jan 2038
   int pos = 0;
   for (int i = 1; i < argc; ++i) {
     if (!strcmp(argv[i], "--ethylene")) ethylene = true;
     else if (!strcmp(argv[i], "--gateway")) gateway = true;
-    else if (!strcmp(argv[i], "--start") && i + 1 < argc) start = atol(argv[++i]);
+    else if (!strcmp(argv[i], "--start") && i + 1 < argc) start = atoll(argv[++i]);
     else if (pos == 0) { online1 = atoi(argv[i]); pos++; }
     else if (pos == 1) { dark    = atoi(argv[i]); pos++; }
   }

@@ -88,8 +88,8 @@ int main() {
   char keyHex[65] = {0};
   for (int i = 0; i < 32; ++i) std::snprintf(keyHex + 2 * i, 3, "%02x", (uint8_t)kKey[i]);
   std::printf("K %u %s\n", kDev, keyHex);
-  std::printf("# board clock starts at kClockBase = %u, true time %u (%ld s behind)\n",
-              kClockBase, truth.now(), (long)truth.now() - (long)kClockBase);
+  std::printf("# board clock starts at kClockBase = %u, true time %u (%lld s behind)\n",
+              kClockBase, truth.now(), (long long)truth.now() - (long long)kClockBase);
 
   uint32_t fastTick = 0;
   for (uint32_t i = 0; i < 36 * kPerDay; ++i) {
