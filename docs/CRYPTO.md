@@ -23,8 +23,8 @@ migration, do not half-change the format in the week the parts arrive.
   a record format change — node, gateway, LoRa frames, flash ring, server,
   captures, the buyer's page — not a driver swap.
 - **Symmetric signing is a scope decision, not an oversight.** The v1 record,
-  its chain and the eight checks are what the whole project is tested on (96
-  firmware checks, the backend suite). Changing the record format in the same
+  its chain and the eight checks are what the whole project is tested on (the
+  firmware selftest, the backend suite). Changing the record format in the same
   week the radio, the NFC reader and the secure element are first powered would
   put every one of those at risk at once.
 

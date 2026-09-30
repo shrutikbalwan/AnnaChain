@@ -37,7 +37,7 @@ you can watch the chain break at exactly that record.
 g++ -std=gnu++17 -DSH_LOG_CAPACITY=4096 -Ilib/ac lib/ac/*.cpp tools/selftest.cpp -o t && ./t
 ```
 
-96 checks, including a power cut in the middle of the outage, a link that dies
+106 checks, including a power cut in the middle of the outage, a link that dies
 mid-batch, a replayed record, an outage longer than the flash itself, gap notices
 crossing the truck gateway, and the gateway being unable to forge a record.
 

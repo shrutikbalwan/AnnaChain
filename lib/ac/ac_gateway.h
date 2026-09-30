@@ -24,6 +24,30 @@
 // before the hole and before the ones after it, and hands it upstream exactly
 // as the node sent it. It reads the notice's fields only to pass them to the
 // uplink; it cannot change one without the server's signature check failing.
+//
+// ── What a node is told when it asks "what does the server have?" ─────────
+// The node reconciles against the server, not against the gateway: that is
+// what makes a lost gateway buffer (the cab loses power; the buffer is RAM) or
+// a gateway overrun recoverable. So a FRAME_QUERY is answered like this:
+//
+//   * The uplink is up and the server answers: the server's last-ACK for that
+//     node, extended over the records (and gap notices) this gateway holds for
+//     it contiguously after that point. Those are on their way; asking the
+//     node for them again would only spend airtime. A record the gateway lost
+//     breaks the run, so the node is asked to resend from there.
+//   * The uplink is down, or the server did not answer: NO VALUE. The node
+//     keeps what it last knew and carries on. Deliberately neither of the two
+//     easy answers: the gateway's own hop-by-hop ack says "I have it" about
+//     records it may since have lost, which is the bug this replaces; zero
+//     makes the node resend its whole flash over LoRa. And no answer is
+//     computed from a cached server value while the uplink is down: a gateway
+//     that has overrun would then ask for records it has nowhere to put, every
+//     sample, for the whole outage.
+//
+// A record is a duplicate if it is in the buffer now, or at or below the last
+// last-ACK the server gave for its node. Not "at or below the highest sequence
+// heard": after an overrun that rule would throw away exactly the records the
+// node was asked to resend.
 #pragma once
 #include "ac_hal.h"
 
@@ -46,6 +70,10 @@ class GwBuffer {
   // costs nothing.
   bool peekAt(uint32_t n, uint8_t frame[kRecBytes]) const;
   bool peekAt(uint32_t n, uint8_t frame[kRecBytes], uint8_t& kind) const;
+  // The first 12 bytes of the n-th frame, decoded: its device and, for a
+  // record, a = seq; for a gap notice, a = from and b = to.
+  bool peekHead(uint32_t n, uint8_t& kind, uint32_t& device, uint32_t& a,
+                uint32_t& b) const;
   void pop();
 
   uint32_t count()       const { return count_; }
@@ -70,6 +98,8 @@ struct IGatewayRadio {
   // hop-by-hop acknowledgement, not proof of delivery to the server — the node
   // still reconciles against the server's own last-ACK.
   virtual bool ack(uint32_t device, uint32_t seq) = 0;
+  // Answer a node's FRAME_QUERY. known = false means "no value" (see above).
+  virtual bool lastAck(uint32_t device, bool known, uint32_t seq) = 0;
 };
 
 struct GwStats {
@@ -106,8 +136,17 @@ class Gateway {
 
   void setBatchSize(uint32_t n) { batch_ = n ? n : 1; }
 
+  // What to tell a node that asks what the server holds (see the top of this
+  // file). False means no value: the uplink is down or the server did not say.
+  bool answerLastAck(uint32_t device, uint32_t& value);
+
  private:
-  bool seenBefore(uint32_t device, uint32_t seq);
+  struct NodeSlot { uint32_t dev; bool known; uint32_t ack; };
+  NodeSlot* slot(uint32_t device, bool add);
+  void      remember(uint32_t device, uint32_t serverAck);
+  void      refresh(uint32_t device);
+  bool      isDuplicate(uint32_t device, uint8_t kind, uint32_t a, uint32_t b) const;
+  uint32_t  heldThrough(uint32_t device, uint32_t serverAck) const;
 
   static const int kMaxNodes = 16;
   uint32_t id_;
@@ -116,8 +155,7 @@ class Gateway {
   GwBuffer&       buf_;
   ILink&          up_;
   uint32_t        batch_ = 20;
-  uint32_t        seenDev_[kMaxNodes] = {0};
-  uint32_t        seenSeq_[kMaxNodes] = {0};
+  NodeSlot        nodeTab_[kMaxNodes] = {};
   int             nodes_ = 0;
   GwStats         s_;
 };

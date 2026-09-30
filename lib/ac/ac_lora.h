@@ -16,6 +16,10 @@
 //   0xAC FRAME_RECORD  + 84 bytes   a record, exactly as signed by the node
 //   0xAC FRAME_GAP     + 84 bytes   a signed gap notice (ac_record.h)
 //   0xAC FRAME_ACK     + device 4 + seq 4    gateway -> node, hop-by-hop
+//   0xAC FRAME_QUERY   + device 4            node -> gateway: what does the server have?
+//   0xAC FRAME_LASTACK + device 4 + known 1 + seq 4
+//                                            gateway -> node: the server's last-ACK,
+//                                            or known = 0 for "no value" (ac_gateway.h)
 // The radio carries bytes; it never interprets a record. Same rule as the
 // gateway: a compromised hop can delay or drop, not invent.
 //
@@ -46,7 +50,7 @@
 
 namespace ac {
 
-enum : uint8_t { kLoraMagic = 0xAC, FRAME_ACK = 0x80 };
+enum : uint8_t { kLoraMagic = 0xAC, FRAME_ACK = 0x80, FRAME_LASTACK = 0x81 };
 
 // The radio itself: bring-up, send a packet, poll for one.
 class Sx1262Transport {
@@ -78,12 +82,15 @@ class LoraRadio : public IGatewayRadio {
   bool begin() override { return t_.begin() == 0; }
   bool receive(uint8_t frame[kRecBytes], uint8_t& kind, int16_t& rssi) override;
   bool ack(uint32_t device, uint32_t seq) override;
+  bool lastAck(uint32_t device, bool known, uint32_t seq) override;
  private:
   Sx1262Transport& t_;
 };
 
 // Node side: an ILink that goes to the gateway over LoRa, not to the server.
-// Like SimNodeToGateway, acknowledgements are hop-by-hop: "the gateway has it".
+// Acknowledgements of records are hop-by-hop ("the gateway has it"), but
+// queryLastAck() asks the gateway for the SERVER's last-ACK, which the gateway
+// relays (ac_gateway.h), so a lost gateway buffer is resent from the right place.
 class LoraNodeLink : public ILink {
  public:
   explicit LoraNodeLink(Sx1262Transport& t, uint32_t ackTimeoutMs = 1500, int tries = 3)

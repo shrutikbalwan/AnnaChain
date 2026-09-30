@@ -369,6 +369,12 @@ signed them, so an accepted record is one that crossed node → radio → gatewa
 USB unchanged. Then type `stat` into a monitor on the gateway (after closing the
 bridge) and check `heard <n> records from 1 nodes`.
 
+Every sample, before sending, the node also asks the gateway what the server
+holds (a `FRAME_QUERY`, answered with `FRAME_LASTACK`; `lib/ac/ac_gateway.h`).
+With the USB uplink the gateway answers it by asking `bridge_serial.py` (a `Q`
+line), so with the bridge stopped the node gets "no value" and carries on from
+what it last knew — that is the designed behaviour, not a fault.
+
 **Before this counts, time it on air.** By the Semtech time-on-air formula a
 record frame (86-byte payload: magic, kind, 84-byte record) at SF9, 125 kHz,
 CR 4/7, 8-symbol preamble, explicit header, CRC on is about **0.66 s**, and the

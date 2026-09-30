@@ -48,6 +48,21 @@ bool GwBuffer::peekAt(uint32_t n, uint8_t frame[kRecBytes], uint8_t& kind) const
   return true;
 }
 
+static inline uint32_t le32(const uint8_t* p) {
+  return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+bool GwBuffer::peekHead(uint32_t n, uint8_t& kind, uint32_t& device, uint32_t& a,
+                        uint32_t& b) const {
+  if (n >= count_) return false;
+  const uint8_t* slot = buf_ + (size_t)((head_ + n) % cap_) * kSlot;
+  kind = slot[0];
+  device = le32(slot + 1);
+  a = le32(slot + 5);                    // a record's seq, or a gap notice's from
+  b = kind == FRAME_GAP ? le32(slot + 9) : a;
+  return true;
+}
+
 void GwBuffer::pop() {
   if (!count_) return;
   head_ = (head_ + 1) % cap_;
@@ -60,25 +75,57 @@ bool Gateway::begin() {
   return radio_.begin();
 }
 
-bool Gateway::seenBefore(uint32_t device, uint32_t seq) {
-  for (int i = 0; i < nodes_; ++i) {
-    if (seenDev_[i] == device) {
-      if (seq <= seenSeq_[i]) return true;     // heard it already
-      seenSeq_[i] = seq;
-      return false;
-    }
-  }
-  if (nodes_ < kMaxNodes) {
-    seenDev_[nodes_] = device;
-    seenSeq_[nodes_] = seq;
-    nodes_++;
-    s_.nodes = (uint32_t)nodes_;
-  }
+Gateway::NodeSlot* Gateway::slot(uint32_t device, bool add) {
+  for (int i = 0; i < nodes_; ++i)
+    if (nodeTab_[i].dev == device) return &nodeTab_[i];
+  if (!add || nodes_ >= kMaxNodes) return nullptr;
+  nodeTab_[nodes_] = NodeSlot{device, false, 0};
+  s_.nodes = (uint32_t)++nodes_;
+  return &nodeTab_[nodes_ - 1];
+}
+
+void Gateway::remember(uint32_t device, uint32_t serverAck) {
+  if (NodeSlot* s = slot(device, true)) { s->known = true; s->ack = serverAck; }
+}
+
+void Gateway::refresh(uint32_t device) {
+  uint32_t a = 0;
+  if (up_.up() && up_.queryLastAck(device, a)) remember(device, a);
+}
+
+bool Gateway::isDuplicate(uint32_t device, uint8_t kind, uint32_t a, uint32_t b) const {
+  // Already at the server, by the server's own last word on it.
+  for (int i = 0; i < nodes_; ++i)
+    if (nodeTab_[i].dev == device && nodeTab_[i].known && b <= nodeTab_[i].ack) return true;
+  // Or in the buffer now, waiting to go.
+  uint8_t k; uint32_t d, x, y;
+  for (uint32_t i = 0; buf_.peekHead(i, k, d, x, y); ++i)
+    if (d == device && k == kind && x == a && y == b) return true;
   return false;
 }
 
-static inline uint32_t le32(const uint8_t* p) {
-  return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+uint32_t Gateway::heldThrough(uint32_t device, uint32_t serverAck) const {
+  // Walk this node's frames in queue order: how far past the server's last-ACK
+  // does an unbroken run of them reach? A hole (a record lost to overrun, or
+  // one that never arrived) stops it there.
+  uint32_t next = serverAck + 1;
+  uint8_t k; uint32_t d, a, b;
+  for (uint32_t i = 0; buf_.peekHead(i, k, d, a, b); ++i) {
+    if (d != device) continue;
+    if (a < next) continue;                        // already covered
+    if (a > next) break;                           // a hole
+    next = b + 1;                                  // a record, or a declared gap
+  }
+  return next - 1;
+}
+
+bool Gateway::answerLastAck(uint32_t device, uint32_t& value) {
+  if (!up_.up()) return false;                     // no value: see ac_gateway.h
+  uint32_t a = 0;
+  if (!up_.queryLastAck(device, a)) return false;  // the server did not say
+  remember(device, a);
+  value = heldThrough(device, a);
+  return true;
 }
 
 void Gateway::poll() {
@@ -89,14 +136,24 @@ void Gateway::poll() {
   while (radio_.receive(rec, kind, rssi)) {
     s_.lastRssi = rssi;
 
+    if (kind == FRAME_QUERY) {
+      // A node asking what the server holds for it. Answered from the server,
+      // never from what this gateway has acknowledged (ac_gateway.h).
+      uint32_t device = le32(rec), v = 0;
+      bool known = answerLastAck(device, v);
+      radio_.lastAck(device, known, v);
+      continue;
+    }
+
     if (kind == FRAME_GAP) {
       // A node declaring records lost. Queue it exactly as it came: the node's
       // signature covers device, range and all, and only the server checks it.
-      // It takes the place of the records it names, so a repeat of it (the
-      // node did not hear our ack) is a duplicate like any other.
-      uint32_t device = le32(rec), to = le32(rec + 8);
+      // A repeat of it (the node did not hear our ack) is a duplicate like any
+      // other.
+      uint32_t device = le32(rec), from = le32(rec + 4), to = le32(rec + 8);
       s_.gapsReceived++;
-      if (seenBefore(device, to)) {
+      slot(device, true);
+      if (isDuplicate(device, FRAME_GAP, from, to)) {
         s_.duplicates++;
         radio_.ack(device, to);
         continue;
@@ -114,11 +171,12 @@ void Gateway::poll() {
     // which reading it is. Everything else is opaque bytes and stays that way.
     uint32_t device = le32(rec);
     uint32_t seq    = le32(rec + 4);
+    slot(device, true);
 
     // A node that did not hear our acknowledgement will send again. Taking the
     // duplicate is harmless; forwarding it wastes uplink, and the server would
     // refuse it anyway.
-    if (seenBefore(device, seq)) {
+    if (isDuplicate(device, FRAME_RECORD, seq, seq)) {
       s_.duplicates++;
       radio_.ack(device, seq);        // re-acknowledge so it stops asking
       continue;
@@ -151,6 +209,7 @@ void Gateway::forward() {
       if (!up_.declareGap(device, from, to, mac)) return;
       s_.gapsForwarded++;
       buf_.pop();
+      refresh(device);
       continue;
     }
 
@@ -175,6 +234,18 @@ void Gateway::forward() {
     s_.batches++;
     s_.forwarded += packed;
     for (uint32_t i = 0; i < packed; ++i) buf_.pop();
+
+    // What did the server actually keep? Ask, per node in the batch: a record
+    // it refused is gone from here, and the node must hear that from the
+    // server, not from our hop-by-hop ack.
+    uint32_t devs[kMaxNodes]; int nd = 0;
+    for (uint32_t i = 0; i < packed; ++i) {
+      uint32_t d = le32(out.data() + (size_t)i * kRecBytes);
+      bool have = false;
+      for (int j = 0; j < nd; ++j) have = have || devs[j] == d;
+      if (!have && nd < kMaxNodes) devs[nd++] = d;
+    }
+    for (int j = 0; j < nd; ++j) refresh(devs[j]);
   }
 }
 

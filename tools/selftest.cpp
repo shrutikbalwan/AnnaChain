@@ -586,6 +586,107 @@ static void test_gateway_cannot_forge() {
         "because the gateway has no key, and the signature no longer matches");
 }
 
+// ── 13. the node reconciles against the SERVER, through the gateway ──────
+// The gateway's hop-by-hop ack says "I have it", and the gateway's buffer is
+// RAM: a cab power cut loses it. A node that asks "what does the server have?"
+// must get the server's answer, relayed by the gateway — not the gateway's own
+// hop-by-hop ack (which hides the loss), and not zero (which resends the whole
+// flash over LoRa).
+struct RelayRig {
+  SimClock   clk{1758758400u};
+  SimRadio   radio;
+  SoftSigner signer{"relay-test-device-key"};
+  SimServer  srv;
+  SimLink    uplink{srv, signer};
+  GwBuffer*  gbuf = nullptr;
+  Gateway*   gw = nullptr;
+  SimSensors sns{6};
+  MemStore   mem{4096};
+  SimNodeToGateway* link = nullptr;
+  Node*      node = nullptr;
+
+  RelayRig() { powerGateway(); bootNode(); }
+  ~RelayRig() { delete node; delete link; delete gw; delete gbuf; }
+  // The cab loses power and comes back: a new gateway with an empty buffer.
+  void powerGateway() {
+    delete gw; delete gbuf;
+    gbuf = new GwBuffer(2000);
+    gw = new Gateway(0xAA0003, clk, radio, *gbuf, uplink);
+    gw->begin(); gw->setBatchSize(20);
+    if (link) link->attach(gw);
+  }
+  // The node reboots: a fresh radio driver and a fresh Node on the same flash.
+  void bootNode() {
+    delete node; delete link;
+    link = new SimNodeToGateway(radio);
+    link->attach(gw);
+    node = new Node(0x3001, clk, sns, mem, *link, signer);
+    node->setBatchSize(20); node->begin();
+  }
+  void tick(bool forward = true) {
+    node->tick(); gw->poll(); if (forward) gw->forward(); clk.advance(300);
+  }
+  // Keep going until the server has everything the node has, or give up.
+  bool settle(int ticks) {
+    for (int i = 0; i < ticks; ++i) {
+      tick();
+      if (srv.lastAck(0x3001) == mem.lastSeq()) return true;
+    }
+    return false;
+  }
+  bool serverInOrder() const {
+    const auto& db = srv.records();
+    for (size_t i = 0; i < db.size(); ++i) if (db[i].seq != i + 1) return false;
+    return true;
+  }
+};
+
+static void test_gateway_relays_server_ack() {
+  head("The node resumes from what the server has, relayed by the gateway");
+  RelayRig r;
+  for (int i = 0; i < 25; ++i) r.tick();
+  CHECK(r.srv.lastAck(0x3001) == 25, "25 records forwarded and acknowledged by the server");
+  r.uplink.setUp(false);
+  for (int i = 0; i < 15; ++i) r.tick(false);
+  CHECK(r.gw->buffered() == 15 && r.mem.loadAck() == 40,
+        "15 more wait in the gateway; the node holds hop-by-hop ack 40");
+
+  r.powerGateway();                        // the cab loses power: 26-40 are gone
+  r.uplink.setUp(true);
+  r.bootNode();                            // and the node reboots
+  size_t mark = r.radio.transmitted().size();
+  r.node->resync();
+  const auto& tx = r.radio.transmitted();
+  CHECK(tx.size() > mark && tx[mark].seq == 26, "after the reboot it resumes at record 26");
+  CHECK(tx.size() - mark == 15, "and resends exactly 26-40, not its whole flash");
+  r.gw->poll(); r.gw->forward();
+  CHECK(r.srv.lastAck(0x3001) == 40 && r.serverInOrder(),
+        "the server ends with 1-40, in order, nothing missing");
+}
+
+static void test_gateway_relay_no_value_yet() {
+  head("The gateway has no word from the server yet");
+  RelayRig r;
+  for (int i = 0; i < 25; ++i) r.tick();
+  r.uplink.setUp(false);
+  for (int i = 0; i < 15; ++i) r.tick(false);
+  r.powerGateway();                        // cab power cut, and still no signal
+  r.bootNode();
+  size_t mark = r.radio.transmitted().size();
+  r.node->resync();
+  CHECK(r.radio.transmitted().size() == mark,
+        "no answer is not zero: the node does not resend its whole flash");
+  CHECK(r.node->ackedSeq() == 40, "it keeps what it last knew, 40");
+  r.tick(false);
+  CHECK(r.radio.transmitted().size() == mark + 1 && r.radio.transmitted().back().seq == 41,
+        "and carries on with record 41");
+
+  r.uplink.setUp(true);                    // signal at the cab: now the gateway can ask
+  CHECK(r.settle(10), "once the gateway can ask the server, the node catches up");
+  CHECK(r.serverInOrder() && r.srv.held() == r.mem.lastSeq(),
+        "and the server holds every record, in order");
+}
+
 int main() {
   std::printf("\n\033[1mAnnaChain self-tests\033[0m\n");
   test_sha256();
@@ -610,6 +711,8 @@ int main() {
   test_gateway_cannot_alter_gap();
   test_gateway_gap_overrun_is_counted();
   test_gateway_cannot_forge();
+  test_gateway_relays_server_ack();
+  test_gateway_relay_no_value_yet();
 
   std::printf("\n%d checks, %d failed\n", checks, failures);
   std::printf("%s\n\n", failures ? "\033[31mSOMETHING IS WRONG\033[0m"
