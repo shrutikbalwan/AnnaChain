@@ -57,6 +57,17 @@ def engine():
             self.alerts.append({"device": dev, "seq": seq, "kind": kind,
                                 "severity": severity, "message": message})
 
+        # the suspect table (db.add_suspect / drop_suspect / suspects)
+        def add_suspect(self, dev, truck, bucket, readings):
+            self.suspects_ = getattr(self, "suspects_", {})
+            self.suspects_[dev] = (truck, bucket, dict(readings))
+
+        def drop_suspect(self, dev):
+            getattr(self, "suspects_", {}).pop(dev, None)
+
+        def suspects(self):
+            return [{"device_id": d} for d in getattr(self, "suspects_", {})]
+
     fake = FakeDB()
     e = AlertEngine(fake)
     e.fake = fake

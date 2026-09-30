@@ -172,6 +172,20 @@ CREATE TABLE IF NOT EXISTS ingest_log (
   accepted INTEGER NOT NULL
 );
 
+-- Nodes the truck has voted against (alerts.py, AlertEngine.diagnose). The
+-- same convention as login_throttle below: small engine state in a table,
+-- loaded at startup. A row is written when a node is flagged and deleted when
+-- it is cleared, so a restart neither forgives a drifting sensor nor re-accuses
+-- a recovered one. The per-truck run lengths leading up to a flag are not kept:
+-- after a restart they rebuild within DISAGREE_RUNS readings.
+CREATE TABLE IF NOT EXISTS suspects (
+  device_id INTEGER PRIMARY KEY,
+  truck     TEXT,
+  flagged   REAL NOT NULL,    -- wall time it was flagged
+  bucket    INTEGER,          -- the time slot whose readings decided it
+  readings  TEXT NOT NULL     -- those readings, JSON {device: temp_c}
+);
+
 -- Brute-force lockout state. Written on server shutdown, read on startup,
 -- so a restart does not clear an active lockout. Expired rows are pruned
 -- when the throttle is reloaded.
@@ -198,7 +212,7 @@ def conn():
 
 TABLES = ("records", "alerts", "gaps", "rejects", "anchors",
           "ingest_log", "shipments", "devices", "checkpoints", "chain_marks",
-          "device_keys", "login_throttle")
+          "device_keys", "login_throttle", "suspects")
 # `audit` survives a reset on purpose: it is the record of who did what.
 # `users` and `sessions` are deliberately not wiped by a reset: losing your
 # login because you reset the demo data is a bad afternoon.
@@ -532,6 +546,24 @@ def shipment_for(device_id: int):
         "SELECT * FROM shipments WHERE device_id=? ORDER BY started DESC LIMIT 1",
         (device_id,),
     ).fetchone()
+
+
+# ── suspect sensors (alerts.py) ──────────────────────────────────────────
+def add_suspect(device_id: int, truck: str, bucket: int, readings: dict):
+    import json
+    conn().execute(
+        "INSERT OR REPLACE INTO suspects(device_id,truck,flagged,bucket,readings) "
+        "VALUES(?,?,?,?,?)",
+        (device_id, truck, time.time(), bucket,
+         json.dumps({str(k): v for k, v in readings.items()}, sort_keys=True)))
+
+
+def drop_suspect(device_id: int):
+    conn().execute("DELETE FROM suspects WHERE device_id=?", (device_id,))
+
+
+def suspects():
+    return conn().execute("SELECT * FROM suspects ORDER BY device_id").fetchall()
 
 
 # ── calibration (check 7) ────────────────────────────────────────────────

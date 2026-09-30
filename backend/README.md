@@ -328,6 +328,14 @@ accurate.
   behind a reverse proxy every request comes from the proxy's address; and
   anyone can lock the real operator out for up to 15 minutes by failing on
   purpose, which is the usual price of a per-username lock.
+- **A suspect sensor stays suspect across a restart** (done). The set lives in
+  the `suspects` table (device, truck, when, and the readings that decided
+  it), written when a node is flagged, deleted when it is cleared, emptied by
+  `/api/reset`, and loaded at startup. The run lengths building up to a flag
+  are not persisted; after a restart they rebuild within three readings.
+  What does not exist: anything that *clears* a suspect. `clear_suspect()` is
+  never called, so a node stays suspect until the database is reset, even if it
+  agrees with the others again.
 - **Chart.js is vendored** (done). `backend/static/chart.umd.min.js` is
   Chart.js 4.4.1, checked against the SRI hash cdnjs publishes, with its MIT
   licence beside it. The dashboard never needs the CDN; the hand-drawn

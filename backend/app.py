@@ -45,6 +45,7 @@ async def lifespan(app):
         verifier.load(d["device_id"], d["last_ack"], d["tip_digest"], d["anchor_next"],
                       d["last_ts"])
     throttle.load()
+    engine.load()
     if db.user_count() == 0:
         # First run: one operator account, so the dashboard is never open by
         # accident. The password is printed once and only once.
@@ -984,7 +985,7 @@ def reset(who: str = Depends(operator)):
     """Wipe everything, for a clean demo run."""
     db.init(reset=True)
     verifier.__init__()
-    engine.state.clear()
+    engine.__init__(db)        # suspects and truck run-lengths too, not only per-device state
     last_ingest_at.clear(); last_batch_n.clear()
     silence_start.clear(); recovering.clear(); _diagnosed.clear()
     return {"ok": True}
