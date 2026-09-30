@@ -8,6 +8,7 @@
 #include "ac_node.h"
 #include "ac_gateway.h"
 #include "ac_sim.h"
+#include "ac_batt.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -472,6 +473,23 @@ static void test_clock_via_gateway() {
   }
 }
 
+// ── 9e. a flat battery reads flat ──────────────────────────────────────────
+// The ADC reading is unsigned. Below 3.3 V, `mv - 3300` wrapped to about four
+// billion before the clamp could see a negative number, so a dying node
+// reported a full battery and alerts.py's battery rule (BATTERY_LOW_PCT) could
+// never fire from a real board.
+static void test_battery_percent() {
+  head("Battery millivolts to percent, at the edges");
+  CHECK(batteryPercent(3000) == 0,   "3.0 V (below empty) reads 0 %, not 100 %");
+  CHECK(batteryPercent(3300) == 0,   "3.3 V reads 0 %");
+  CHECK(batteryPercent(3750) == 50,  "3.75 V reads 50 %");
+  CHECK(batteryPercent(4200) == 100, "4.2 V reads 100 %");
+  CHECK(batteryPercent(4500) == 100, "4.5 V (above full) reads 100 %");
+  CHECK(batteryPercent(0) == 0,      "0 V (divider not connected) reads 0 %");
+  CHECK(batteryPercent(3479) == 19 && batteryPercent(3480) == 20,
+        "the low-battery alert (below 20 %) starts under 3.48 V");
+}
+
 // ── 10. a sensor that stops answering ─────────────────────────────────────
 static void test_sensor_fault() {
   head("The sensor stops answering");
@@ -894,6 +912,7 @@ int main() {
   test_clock_reboot_never_backwards();
   test_clock_set_by_server();
   test_clock_via_gateway();
+  test_battery_percent();
   test_sensor_fault();
   test_gateway_basic();
   test_gateway_buffers_when_uplink_dies();

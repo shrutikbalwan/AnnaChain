@@ -1,6 +1,7 @@
 #ifdef ARDUINO
 #include "ac_esp.h"
 #include "ac_sha256.h"
+#include "ac_batt.h"
 #include <Preferences.h>
 #include <Wire.h>
 
@@ -143,8 +144,7 @@ Reading Sht40Sensors::read() {
   if (tamperPin_ >= 0) v.tamper = (digitalRead(tamperPin_) == HIGH);
   if (battPin_ >= 0) {
     uint32_t mv = analogReadMilliVolts(battPin_) * 2;     // 2:1 divider
-    int pct = (int)((mv - 3300) * 100 / (4200 - 3300));   // rough Li-ion curve
-    v.batt = (uint8_t)(pct < 0 ? 0 : pct > 100 ? 100 : pct);
+    v.batt = batteryPercent(mv);                          // ac_batt.h, tested in selftest
   } else {
     v.batt = 100;
   }
