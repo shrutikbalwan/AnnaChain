@@ -405,7 +405,7 @@ function draw(s){
   const rj = $('rejects');
   rj.innerHTML = s.rejects.length
     ? s.rejects.map(r => `<div class="alert high"><div class="h">refused</div>
-        <div class="m">record ${r.seq} — ${r.reason}</div></div>`).join('')
+        <div class="m">record ${r.seq} — ${esc(r.reason)}${r.hint ? '<br><span class="note">' + esc(r.hint) + '</span>' : ''}</div></div>`).join('')
     : '<div class="empty">Nothing refused.</div>';
 }
 

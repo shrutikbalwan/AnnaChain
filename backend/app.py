@@ -276,11 +276,33 @@ def last_ack(device: int):
     return {"device": device, "last_ack": d["last_ack"], "now": int(time.time())}
 
 
+def signature_hint(device, seq, last_ack):
+    """What a "bad signature" can honestly be said to mean (P4).
+
+    The server cannot know that the device "was enrolled by a different key".
+    It knows the record does not verify under the key it holds for that id. A
+    record that looks like the start of a board's log (seq 1, or at or below
+    what the server already holds) failing that way is the typical symptom of
+    a database that enrolled this id with another key: a demo capture, or an
+    earlier flash of the board. Anything else is more likely a record changed
+    after it was signed. The reason stays "bad signature"; this is beside it."""
+    head = (f"this record does not verify under the key enrolled for device "
+            f"{device:08X} ({device})")
+    if seq == 1 or seq <= (last_ack or 0):
+        return (head + ". A board whose log starts again (seq " + str(seq) + ", the server "
+                "already holds " + str(last_ack or 0) + ") failing this way is the typical "
+                "symptom of a database that enrolled this id with a different key: a demo "
+                "capture, or an earlier flash of the board. If that is what happened, run "
+                "`make clean` (a demo database) or rotate the key (POST /api/register with "
+                "rotate=true, as an admin). If not, treat it as a forged or altered record.")
+    return head + ": it was changed after it was signed, or signed by another key."
+
+
 @app.post("/api/ingest")
 def ingest(body: Ingest):
     """A batch of records. All eight checks, then storage — in that order."""
     now = time.time()
-    accepted, rejected, first_reason = 0, 0, None
+    accepted, rejected, first_reason, hint = 0, 0, None, None
     dev = None
     ships = {}                 # device -> its shipment row, looked up once
     touched = {}               # device -> newest timestamp accepted in this batch
@@ -329,7 +351,9 @@ def ingest(body: Ingest):
         if not ok:
             rejected += 1
             first_reason = first_reason or reason
-            db.add_reject(dev, r["seq"], reason)
+            if reason == "bad signature":
+                hint = signature_hint(dev, r["seq"], verifier.ack.get(dev, 0))
+            db.add_reject(dev, r["seq"], reason, hint)
             break        # the chain cannot continue past a bad record
 
         if dev not in ships:
@@ -372,7 +396,7 @@ def ingest(body: Ingest):
 
     db.log_ingest(len(body.records), accepted)
     return {"accepted": accepted, "rejected": rejected,
-            "reason": first_reason,
+            "reason": first_reason, "hint": hint,
             "last_ack": verifier.ack.get(dev, 0) if dev else 0}
 
 

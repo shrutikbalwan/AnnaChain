@@ -156,7 +156,8 @@ CREATE TABLE IF NOT EXISTS rejects (
   device_id INTEGER,
   seq       INTEGER,
   reason    TEXT NOT NULL,
-  at        REAL NOT NULL
+  at        REAL NOT NULL,
+  hint      TEXT          -- what a person should check, when the server can say
 );
 
 CREATE TABLE IF NOT EXISTS anchors (
@@ -250,6 +251,9 @@ def _migrate(c):
     have = {r["name"] for r in c.execute("PRAGMA table_info(gaps)")}
     if "mac" not in have:
         c.execute("ALTER TABLE gaps ADD COLUMN mac TEXT")
+    have = {r["name"] for r in c.execute("PRAGMA table_info(rejects)")}
+    if "hint" not in have:
+        c.execute("ALTER TABLE rejects ADD COLUMN hint TEXT")
 
     # Devices enrolled before key history existed: their current key has signed
     # everything so far.
@@ -484,10 +488,10 @@ def gaps(device_id: int = None):
     ).fetchall()
 
 
-def add_reject(device_id, seq, reason):
+def add_reject(device_id, seq, reason, hint=None):
     conn().execute(
-        "INSERT INTO rejects(device_id,seq,reason,at) VALUES(?,?,?,?)",
-        (device_id, seq, reason, time.time()),
+        "INSERT INTO rejects(device_id,seq,reason,at,hint) VALUES(?,?,?,?,?)",
+        (device_id, seq, reason, time.time(), hint),
     )
     conn().commit()
 

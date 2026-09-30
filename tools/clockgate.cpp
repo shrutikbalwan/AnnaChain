@@ -33,7 +33,7 @@
 
 using namespace ac;
 
-static const uint32_t kDev = 0x26232101;      // not a demo id (docs/HIL.md step 1)
+static const uint32_t kDev = 0x2623C001;      // neither a demo id nor the board's (HIL.md step 1)
 static const char*    kKey = "annachain-clock-gate-key-0000000";
 
 // The server end of a USB or Wi-Fi link: answers with its last-ACK and its own

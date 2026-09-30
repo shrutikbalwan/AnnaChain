@@ -90,10 +90,18 @@ def main(argv=None):
                     print(f"registered {device:08X}, server has {r['last_ack']}")
                 except urllib.error.HTTPError as e:
                     # 409: the board presented a different key from the one on
-                    # file. That is either a wiped board or an attack, and it is
-                    # not this script's job to decide which.
+                    # file. That is either a wiped board, a board sharing an id
+                    # with a demo capture, or an attack, and it is not this
+                    # script's job to decide which. It can say what to do.
                     print(f"\033[31m  enrolment refused ({e.code}): "
                           f"{e.read().decode(errors='replace')}\033[0m")
+                    if e.code == 409:
+                        print(f"\033[31m  device {device:08X} is enrolled with a different "
+                              f"key. If this database has seen a demo, run `make clean` "
+                              f"(mingw32-make clean) and restart the server; if this is a "
+                              f"re-flashed board, an admin can rotate the key (POST "
+                              f"/api/register with rotate=true). Until then every record "
+                              f"will be refused as `bad signature`.\033[0m")
 
             elif line.startswith("Q "):
                 dev = int(line.split()[1])
@@ -116,6 +124,8 @@ def main(argv=None):
                         reply(f"A {r['last_ack']}")
                     else:
                         print(f"  \033[31mrefused: {r['reason']}\033[0m")
+                        if r.get("hint"):
+                            print(f"  \033[31m  {r['hint']}\033[0m")
                         reply(f"N {r['reason']}")
                     pending, expect = [], 0
 

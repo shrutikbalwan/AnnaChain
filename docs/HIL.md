@@ -44,11 +44,15 @@ procedure.
   second one fails with *Access is denied* / *could not open port*.
 - **Start from a clean server database for every step that talks to the
   server** (`mingw32-make clean`, or delete `backend/annachain.db*` and
-  `backend/ledger.jsonl`). The laptop demos (`dump`, `fleet`) enrol device
-  `26232001` (decimal 639836161) with a published dev key. The board uses the
-  same device id with a key it generated itself. On a database that has seen a
-  demo, the board's enrolment is refused with **409** and every record it sends
-  is refused as `bad signature`.
+  `backend/ledger.jsonl`). The laptop demos (`dump`, `fleet`, the seed
+  capture) enrol devices `26232001`–`26232003` with published dev keys. The
+  board is **`26232101`** (decimal **639836417**; `AC_DEVICE_ID` in
+  `src/main.cpp`, `-DAC_DEVICE_ID=0x26232102` for a second board), so a demo
+  and the board no longer collide. Until 1 Oct 2026 the board was `26232001`
+  too: on a database that had seen a demo its enrolment was refused (409) and
+  every record failed `bad signature`. A database left over from an earlier
+  flash of the same board still does that (the new flash made a new key);
+  the server now says so beside the reason (step 1, failure 3).
 - The server must listen on the network for anything that is not on the
   laptop's own USB port: `python -m uvicorn backend.app:app --host 0.0.0.0 --port 8000`.
 
@@ -135,11 +139,11 @@ database).
 ```
 bridging COM<n> <-> http://127.0.0.1:8000
 
-# AnnaChain node 26232001
+# AnnaChain node 26232101
 # flash ring 4096 records, holding 0, last seq 0, server has 0
 # sensors: MOCK (no parts needed)
 # link: USB serial
-registered 26232001, server has 0
+registered 26232101, server has 0
 # press BOOT to drop the link, press again to restore it
 # type 'wipe' to clear the flash and start a fresh run
   +  1  ack 1
@@ -148,10 +152,10 @@ registered 26232001, server has 0
 #     2    4.<nn> C  <nn>.<nn> %  batt 100  sent  waiting 0
 ```
 
-(The `K 639836161 <64 hex>` line the node prints is consumed by the bridge, not
-echoed: it is what produces `registered 26232001`.)
+(The `K 639836417 <64 hex>` line the node prints is consumed by the bridge, not
+echoed: it is what produces `registered 26232101`.)
 
-**Passes when** the dashboard shows device `26232001` with a line near 4 °C
+**Passes when** the dashboard shows device `26232101` with a line near 4 °C
 growing by one point every 5 s, status **live**. Then press BOOT: the node prints
 `# LINK DOWN — still logging`, the dashboard goes **silent**; press it again and
 the held records arrive in one batch (`+ <n>`), drawn late in orange.
@@ -168,10 +172,18 @@ the held records arrive in one batch (`+ <n>`), drawn late in orange.
    flash was wiped (or a second board with the same id) sent a flagged record to
    a database that has seen this device's wall-clock records. Clean the
    database, as for failure 3.
-3. **`enrolment refused (409)`** then `bad signature` on everything: the database
-   already holds device 26232001 with another key (a demo capture, or an earlier
-   flash whose NVS key was erased). Clean the database. Nothing prints at all:
-   wrong USB socket (use **UART**), or the monitor still holds the port.
+3. **`enrolment refused (409)`** then `refused: bad signature` on everything,
+   with the bridge adding *device 26232101 is enrolled with a different key…
+   run `make clean` … or rotate the key*, and the dashboard's refusal showing
+   *this record does not verify under the key enrolled for device 26232101 …
+   the typical symptom of a database that enrolled this id with a different
+   key*. The database holds this id with another key: an earlier flash whose
+   NVS key was erased, or a board built with a demo id. `mingw32-make clean`
+   and restart the server, or have an admin rotate the key
+   (`POST /api/register` with `rotate: true`). Check 2 still refuses the
+   records until then; the hint only says why.
+4. **Nothing prints at all**: wrong USB socket (use **UART**), or the monitor
+   still holds the port.
 
 ### The node's clock (P1, 1 Oct 2026)
 
@@ -249,11 +261,11 @@ python backend/bridge_serial.py COM<n>
 ```
 bridging COM<n> <-> http://127.0.0.1:8000
 
-# AnnaChain node 26232001
+# AnnaChain node 26232101
 # flash ring 4096 records, holding <n>, last seq <n>, server has <n>
 # sensors: SHT40 on I2C
 # link: USB serial
-registered 26232001, server has 0
+registered 26232101, server has 0
 # press BOOT to drop the link, press again to restore it
 # type 'wipe' to clear the flash and start a fresh run
   +  1  ack 1
@@ -300,16 +312,16 @@ pio device monitor -b 115200
 
 ```
 
-# AnnaChain node 26232001
+# AnnaChain node 26232101
 # flash ring 4096 records, holding <n>, last seq <n>, server has <n>
 # sensors: SHT40 on I2C
 # link: SX1262 LoRa <up|NOT READY> (UNPROVEN driver)
 # NFC: PN532 ready (UNPROVEN driver)
-K 639836161 <64 hex>
+K 639836417 <64 hex>
 # press BOOT to drop the link, press again to restore it
 # type 'wipe' to clear the flash and start a fresh run
-T 639836161 assign <uid hex> <unix time>
-T 639836161 tap <uid hex> <unix time>
+T 639836417 assign <uid hex> <unix time>
+T 639836417 tap <uid hex> <unix time>
 ```
 
 (If no SX1262 is fitted there is also a `# SX1262 begin failed, RadioLib code
@@ -406,7 +418,7 @@ The node's `K <device> <key>` line appears on the **node's** serial port, which
 the bridge is not reading, so enrol the node by hand once (operator login):
 
 ```
-python -c "import json,urllib.request as u;B='http://127.0.0.1:8000';p=lambda path,b,h={}:json.load(u.urlopen(u.Request(B+path,json.dumps(b).encode(),{'Content-Type':'application/json',**h})));t=p('/api/login',{'username':'operator','password':'annachain'})['token'];print(p('/api/register',{'device':639836161,'key_hex':'<64 hex from the K line>'},{'Authorization':'Bearer '+t}))"
+python -c "import json,urllib.request as u;B='http://127.0.0.1:8000';p=lambda path,b,h={}:json.load(u.urlopen(u.Request(B+path,json.dumps(b).encode(),{'Content-Type':'application/json',**h})));t=p('/api/login',{'username':'operator','password':'annachain'})['token'];print(p('/api/register',{'device':639836417,'key_hex':'<64 hex from the K line>'},{'Authorization':'Bearer '+t}))"
 ```
 
 **Expected output** of the bridge on the gateway's port:
