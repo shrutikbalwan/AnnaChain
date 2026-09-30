@@ -37,8 +37,33 @@ you can watch the chain break at exactly that record.
 g++ -std=gnu++17 -DSH_LOG_CAPACITY=4096 -Ilib/ac lib/ac/*.cpp tools/selftest.cpp -o t && ./t
 ```
 
-46 checks, including a power cut in the middle of the outage, a link that dies
-mid-batch, a replayed record, and an outage longer than the flash itself.
+92 checks, including a power cut in the middle of the outage, a link that dies
+mid-batch, a replayed record, an outage longer than the flash itself, gap notices
+crossing the truck gateway, and the gateway being unable to forge a record.
+
+---
+
+## Screenshots — what it looks like running
+
+**`./demo.exe` — the Nashik → JNPT run, end to end**
+
+![demo.exe terminal output showing DEMO PASSED, 350 records held and recovered](docs/img/screenshot_demo_exe.png)
+
+**`./selftest.exe` — 92 firmware checks, all green**
+
+![selftest.exe terminal output showing 92 checks 0 failed ALL GOOD](docs/img/screenshot_selftest_exe.png)
+
+**Operations dashboard — three nodes, one suspect sensor, chain intact**
+
+![Dashboard showing 420 records, 120 recovered after outage, Crate node B flagged SUSPECT, Merkle root displayed](docs/img/screenshot_dashboard.jpg)
+
+**Buyer trace page (mobile) — public, no login, re-verifiable**
+
+![Mobile buyer trace page showing "Kept, but it warmed up on the way", temperature chart, 3 sensors on truck](docs/img/screenshot_buyer_trace.jpg)
+
+**Printable crate label with QR code**
+
+![Crate label for AC-26232001 with QR code linking to the buyer trace page](docs/img/screenshot_crate_label.jpg)
 
 ---
 
