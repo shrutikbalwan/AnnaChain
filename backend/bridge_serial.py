@@ -16,6 +16,7 @@ the board is the antenna being pulled.
     node -> Q <device>           what is the last sequence you have?
     node -> G <dev> <from> <to> <mac>  these records are gone (signed by the node)
     node -> K <dev> <keyhex>     development key announcement
+    node -> T <dev> <assign|tap> <uid> <time>  a PN532 tap: becomes a checkpoint
     node -> # ...                human-readable chatter, echoed, not parsed
     us   -> A <seq>              accepted up to here
     us   -> N <reason>           refused
@@ -37,7 +38,7 @@ def call(base, path, payload=None, method="POST", token=None):
         return json.load(r)
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("port", help="serial port, e.g. COM5 or /dev/ttyACM0")
     ap.add_argument("--baud", type=int, default=115200)
@@ -45,7 +46,7 @@ def main():
     ap.add_argument("--user", default="operator",
                     help="operator login, needed to enrol the node (not to send records)")
     ap.add_argument("--password", default="annachain")
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
     token = call(a.base, "/api/login",
                  {"username": a.user, "password": a.password})["token"]
 
@@ -111,6 +112,26 @@ def main():
                         print(f"  \033[31mrefused: {r['reason']}\033[0m")
                         reply(f"N {r['reason']}")
                     pending, expect = [], 0
+
+            elif line.startswith("T "):
+                # T <device> <assign|tap> <uid-hex> <unix-time>: a PN532 tap
+                # (src/main.cpp, env:node_lora). It becomes a checkpoint on the
+                # node's shipment. It is a logged claim: not signed by the
+                # device and not in the hash chain, and the note says so.
+                # This is the only way a tap reaches the server — over LoRa it
+                # is not carried (no FRAME_TAP; backend/README.md).
+                _, dev, what, uid, ts = line.split()
+                step = "commissioning" if what == "assign" else "inspecting"
+                try:
+                    call(a.base, "/api/checkpoint",
+                         {"shipment_id": f"AC-{int(dev):08X}", "place": f"NFC tag {uid}",
+                          "biz_step": step, "ts": int(ts),
+                          "note": "PN532 tap over USB: not signed, not in the hash chain"},
+                         token=token)
+                    print(f"  tap {what} {uid} -> {step}")
+                except urllib.error.HTTPError as e:
+                    print(f"\033[31m  tap {uid} not recorded ({e.code}): "
+                          f"{e.read().decode(errors='replace')}\033[0m")
 
             elif line.startswith("G "):
                 _, dev, lo, hi, mac = line.split()

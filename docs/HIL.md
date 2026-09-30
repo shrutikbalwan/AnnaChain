@@ -268,9 +268,12 @@ prints it once, not once per poll.
    mode.
 2. **The tag is never seen.** The PN532 finds only ISO 14443A tags
    (MIFARE/NTAG). A 125 kHz access-card fob is not one.
-3. **The tap does not reach the server.** A tap is printed on the node's serial
-   line only. It is not carried over LoRa (there is no `FRAME_TAP`; see
-   `backend/README.md`), and it is not signed or chained.
+3. **The tap does not reach the server.** It only can over USB: close the
+   monitor and run `python backend/bridge_serial.py COM<node>` on the **node's**
+   port (with the server running). The bridge prints `tap assign <uid> ->
+   commissioning` and the shipment gains a checkpoint. A tap is not carried over
+   LoRa (there is no `FRAME_TAP`; see `backend/README.md`), and it is not signed
+   or chained. The tap's time is the node's clock (step 1, failure 1).
 
 ---
 

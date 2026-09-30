@@ -331,6 +331,16 @@ accurate.
   before it is refused. A clock that is wrong by less than that (a few hours
   behind, say) is not caught, and the node still has no NTP or RTC. The 30 days
   is flash capacity (about 14 days at 5-minute sampling) plus a gateway buffer.
+- **NFC custody taps travel over USB only — handover is the USB-tethered
+  configuration.** The PN532 build (`env:node_lora`) prints each tap on the
+  node's serial line (`T <device> <assign|tap> <uid> <time>`), and
+  `bridge_serial.py`, run on the node's USB port, turns it into a checkpoint on
+  the node's shipment (`assign` = commissioning, `tap` = inspecting). Over LoRa a
+  tap is not carried at all: there is no `FRAME_TAP`, so a node that is not
+  tethered records no handovers. A tap is also not signed and not in the hash
+  chain: it is a logged claim, and the checkpoint's note says so. Until this
+  change the bridge ignored `T` lines, so taps reached nothing even over USB.
+  Any slide implying custody events travel over the radio is wrong.
 - **Ethylene is simulated only when asked for.** The capture tools default to
   "not fitted", like the board. With `--ethylene` the simulator invents a
   curve, and the record format has no flag saying so, so the server cannot
