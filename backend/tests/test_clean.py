@@ -114,6 +114,25 @@ def test_a_really_open_database_is_refused(tmp_path):
     assert not (tmp_path / "fleet.capture").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="only Windows refuses to delete an open file")
+def test_the_report_reads_in_order_when_piped(tmp_path):
+    """Through make the two streams share one pipe. The summary must come
+    first, then what went wrong, then the verdict, not stdout's buffer last."""
+    tree(tmp_path, ["fleet.capture", "backend/ledger.jsonl"])
+    db = tmp_path / "backend" / "annachain.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE t(x)")
+    conn.commit()
+    try:
+        r = subprocess.run([sys.executable, str(CLEAN), "--root", str(tmp_path)],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    finally:
+        conn.close()
+    lines = [l for l in r.stdout.splitlines() if l.strip()]
+    assert lines[0].startswith("clean: removed"), lines
+    assert lines[-1].startswith("clean: FAILED"), lines
+
+
 def test_the_makefile_uses_it():
     mk = (ROOT / "Makefile").read_text(encoding="utf-8")
     body = mk.split("\nclean:", 1)[1].split("\n.PHONY", 1)[0]

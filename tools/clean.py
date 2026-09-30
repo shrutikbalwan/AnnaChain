@@ -51,7 +51,9 @@ def main(argv=None) -> int:
         except OSError as e:
             failed.append((p, e))
 
-    print(f"clean: removed {removed} file(s)")
+    # Flushed: under make both streams share one pipe, and a buffered stdout
+    # would print this summary after the errors instead of before them.
+    print(f"clean: removed {removed} file(s)", flush=True)
     if not failed:
         return 0
 
