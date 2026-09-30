@@ -153,7 +153,8 @@ int main(int argc, char** argv) {
     "node B drifts to +%.1f C by the end; A and C stay honest\n"
     "ethylene: %s\n",
     total, online, dark, drift,
-    ethylene ? "SIMULATED (--ethylene). The board has no ethylene sensor."
+    ethylene ? "SIMULATED (--ethylene), flagged in every record (FLAG_SIMULATED). "
+               "The board has no ethylene sensor."
              : "not fitted, as on the real board");
   return 0;
 }

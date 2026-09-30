@@ -42,6 +42,11 @@ enum Flags : uint8_t {
   FLAG_COLD     = 1 << 3,  // below 0 C — charging inhibited
   FLAG_SELFTEST  = 1 << 4,  // first record after power-up
   FLAG_SENSORBAD = 1 << 5,  // the sensor did not answer — this reading is not a measurement
+  // A value in this record was invented by the simulator, not measured. Today
+  // that means only the ethylene curve SimSensors makes up when told a sensor is
+  // fitted (dump/fleet --ethylene); the board has none. Mock temperatures
+  // (node_mock, dump, fleet) do NOT set it. Inside the signature, like every flag.
+  FLAG_SIMULATED = 1 << 6,
 };
 
 constexpr uint16_t kEthyleneNotFitted = 0xFFFF;

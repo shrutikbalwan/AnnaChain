@@ -341,11 +341,13 @@ accurate.
   chain: it is a logged claim, and the checkpoint's note says so. Until this
   change the bridge ignored `T` lines, so taps reached nothing even over USB.
   Any slide implying custody events travel over the radio is wrong.
-- **Ethylene is simulated only when asked for.** The capture tools default to
-  "not fitted", like the board. With `--ethylene` the simulator invents a
-  curve, and the record format has no flag saying so, so the server cannot
-  tell; the dashboard's note under the chart says where such values can only
-  come from.
+- **Ethylene is simulated only when asked for, and then it says so** (done).
+  The capture tools default to "not fitted", like the board. With `--ethylene`
+  the simulator invents a curve, and every such record carries
+  `FLAG_SIMULATED` (bit 6, 0x40), inside the signature. The dashboard badges
+  them SIMULATED under the ethylene chart, and the buyer's page counts them
+  with the same badge. The flag covers the invented ethylene only: the mock
+  temperatures of `node_mock`, `dump` and `fleet` are not flagged.
 - **Failed logins back off** (done). After 5 failures in a row for a username,
   or from one address, sign-in is refused for 30 s, doubling with each further
   failure up to 15 minutes; the right password is refused too while the lock

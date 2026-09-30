@@ -37,6 +37,18 @@ def _browser(p):
 def live(client, auth):
     enrol(client, auth, DEV, KEY)
     assert ingest(client, trip(KEY, DEV, 60)) == 60
+    yield from _serve()
+
+
+@pytest.fixture
+def live_simulated(client, auth):
+    """A trip whose ethylene was invented by the simulator (FLAG_SIMULATED)."""
+    enrol(client, auth, DEV, KEY)
+    assert ingest(client, trip(KEY, DEV, 20, flags=64, c2h4=30)) == 20
+    yield from _serve()
+
+
+def _serve():
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
     port = s.getsockname()[1]
@@ -110,6 +122,28 @@ def test_dashboard_draws_with_vendored_chartjs_and_no_network(live):
         br.close()
     assert has_chart and fallback == 0
     assert offsite == [] and bad == [] and errors == []
+
+
+def test_simulated_readings_are_badged_on_both_pages(live_simulated):
+    live = live_simulated
+    with playwright.sync_playwright() as p:
+        br = _browser(p)
+        page = br.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(f"{live}/t/{SHIP}")
+        page.wait_for_selector("#btn")
+        trace = page.inner_text("#wrap")
+        page.goto(f"{live}/")
+        page.fill("input:not([type=password])", "operator")
+        page.fill("input[type=password]", "annachain")
+        page.press("input[type=password]", "Enter")
+        page.wait_for_function("document.querySelector('#e-note').textContent.length > 0")
+        note = page.inner_text("#e-note")
+        br.close()
+    assert errors == []
+    assert "SIMULATED" in trace and "20" in trace
+    assert "SIMULATED" in note
 
 
 def test_doctored_reading_is_reported_on_the_page(live):

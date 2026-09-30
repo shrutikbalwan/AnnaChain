@@ -187,7 +187,8 @@ int main(int argc, char** argv) {
   std::fprintf(stderr, "dumped %u records (%d online, %d through the outage)\n",
                node.stats().stored, online1, dark);
   std::fprintf(stderr, ethylene
-      ? "ethylene: SIMULATED (--ethylene). The board has no ethylene sensor.\n"
+      ? "ethylene: SIMULATED (--ethylene), and flagged so in every record (FLAG_SIMULATED).\n"
+        "The board has no ethylene sensor.\n"
       : "ethylene: not fitted, as on the real board\n");
   return 0;
 }

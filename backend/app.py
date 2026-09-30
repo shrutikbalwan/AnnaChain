@@ -489,6 +489,7 @@ def state(device: int | None = None, who: str = Depends(operator)):
         "e": r["c2h4_ppb"], "b": r["batt_pct"],
         "lag": r["lag_s"], "f": r["flags"],
         "u": bool(r["uncertified"]),      # check 7: calibration had lapsed
+        "sim": bool(r["flags"] & checks.FLAG_SIMULATED),   # an invented value
     } for r in rows]
 
     recovered = db.conn().execute(
@@ -508,6 +509,7 @@ def state(device: int | None = None, who: str = Depends(operator)):
         "last_seq": d["last_ack"],
         "recovered": recovered,
         "declared_lost": lost,
+        "simulated": sum(1 for p in series if p["sim"]),
         "series": series,
         "alerts": [dict(a) for a in db.alerts(30, device_id=device)],
         "rejects": [dict(x) for x in db.rejects(10)],
@@ -911,6 +913,7 @@ def trace(shipment_id: str):
         "limit_lo": lo, "limit_hi": hi,
         "minutes_out": len(out_of_range) * step_s // 60,
         "sensor_faults": len(rows) - len(good),
+        "simulated_readings": sum(1 for r in rows if r["flags"] & checks.FLAG_SIMULATED),
         "declared_lost": lost,
         "gaps": [{"from": g["from_seq"], "to": g["to_seq"]} for g in gaps],
         "chain_ok": v["ok"],
@@ -922,7 +925,8 @@ def trace(shipment_id: str):
         "nodes_on_truck": len(truck_nodes),
         "series": [{"seq": r["seq"], "ts": r["ts"],
                     "t": None if (r["flags"] & checks.FLAG_SENSORBAD) else r["temp_c"],
-                    "late": r["lag_s"] > 0} for r in rows],
+                    "late": r["lag_s"] > 0,
+                    "sim": bool(r["flags"] & checks.FLAG_SIMULATED)} for r in rows],
     }
 
 

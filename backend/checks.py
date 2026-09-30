@@ -50,6 +50,7 @@ MAX_HOLD_S = 30 * 86400         # older than a node (14 days of flash) plus a ga
 
 FLAG_TAMPER, FLAG_MOVED, FLAG_CHARGING = 1, 2, 4
 FLAG_COLD, FLAG_SELFTEST, FLAG_SENSORBAD = 8, 16, 32
+FLAG_SIMULATED = 64            # a value was invented by the simulator (ethylene)
 
 ETHYLENE_NOT_FITTED = 0xFFFF
 SENSOR_MIN_C, SENSOR_MAX_C = -40.0, 125.0      # SHT40's own rated range
@@ -70,6 +71,7 @@ def parse(raw: bytes) -> dict:
         "cold":      bool(flags & FLAG_COLD),
         "selftest":  bool(flags & FLAG_SELFTEST),
         "sensor_bad": bool(flags & FLAG_SENSORBAD),
+        "simulated": bool(flags & FLAG_SIMULATED),
         "prev": raw[20:52].hex(),
         "sig":  raw[52:84].hex(),
     }

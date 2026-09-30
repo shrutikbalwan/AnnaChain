@@ -39,6 +39,7 @@ Reading SimSensors::read() {
     double ppb = 20.0 + c2h4Acc_;
     if (ppb > 65535) ppb = 65535;
     v.c2h4 = (uint16_t)ppb;
+    v.simulated = true;              // there is no such sensor: say so, in the record
   } else {
     v.c2h4 = kEthyleneNotFitted;
   }

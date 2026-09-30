@@ -33,6 +33,7 @@ struct Reading {
   bool     moved  = false;
   bool     charging = false;
   bool     ok = true;                    // false = the sensor did not answer
+  bool     simulated = false;            // a value here was invented (FLAG_SIMULATED)
 };
 
 struct ISensors {

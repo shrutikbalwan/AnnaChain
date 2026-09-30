@@ -92,17 +92,18 @@ g++ -std=c++17 -Wall -DAC_LOG_CAPACITY=4096 -Ilib/ac $CORE tools/selftest.cpp -o
 ./selftest
 ```
 
-**Expected:** `110 checks, 0 failed` and `ALL GOOD`. (70 originally; 8 were
+**Expected:** `113 checks, 0 failed` and `ALL GOOD`. (70 originally; 8 were
 added for the signed gap notice and the clock base, 14 for gap notices
 crossing the truck gateway, 4 for the frozen v1 record format, 10 for the
-gateway relaying the server's last-ACK, and 4 for records the gateway lost
-being resent.)
+gateway relaying the server's last-ACK, 4 for records the gateway lost
+being resent, and 3 for the simulated-value flag.)
 
 Read the section names as they scroll. They must include, and all pass:
 
 - SHA-256 against the published vectors *(if this fails, nothing else means anything)*
 - Record encoding — including a sub-zero temperature surviving as signed
 - The v1 record format is frozen, and has no version byte
+- Invented ethylene is flagged as simulated, inside the signature
 - Store first, transmit second — **C1**
 - 29 hours dark, then catch up — **C2**
 - The link dies in the middle of the catch-up
@@ -120,7 +121,7 @@ Read the section names as they scroll. They must include, and all pass:
   has no word from the server yet"** and **"Records the gateway overwrote are
   resent, because the server says so"** — **C2**, **C4**, **C6**
 
-**FAIL if:** the count is below 110, anything is red, or a section above is missing.
+**FAIL if:** the count is below 113, anything is red, or a section above is missing.
 
 Then the server's own suite:
 
@@ -318,7 +319,7 @@ Reporting them as bugs is a false positive.
 | Signatures are **HMAC, not ECDSA** | The ATECC608B is not fitted yet. The interface is already the secure element's |
 | The ledger is **local, not distributed** | `ledger.py` has a real hash-linked ledger and a Fabric adapter that reports itself unavailable. Every anchor returns `"distributed": false` |
 | **SQLite, not PostgreSQL + TimescaleDB** | Schema is written for the move; `records` is the hypertable candidate |
-| **No ethylene sensor is read** | The field transmits *not fitted*. The part has not been chosen, on purpose |
+| **No ethylene sensor is read** | The field transmits *not fitted*. The part has not been chosen, on purpose. A capture made with `--ethylene` carries invented values, and every such record says so (`FLAG_SIMULATED`, badged SIMULATED on both pages) |
 | Shelf-life parameters are **not validated** | Literature-typical Q10 values. Every response carries the caveat |
 | The SX1262, PN532, ATECC608B and Wi-Fi/NTP drivers are **UNPROVEN** | Written, never compiled for the board, never run on a part: none has arrived (`docs/HIL.md`). The gateway and node logic above them is tested in the simulator |
 | The clock starts from a **compiled-in date** | No NTP or RTC yet; the server's timestamp check is what catches a wrong one |
@@ -447,7 +448,7 @@ gateway, and records the *gateway* loses to its own overrun or a power cut
 | Component | Pass / Fail | Evidence |
 |---|---|---|
 | Build, no warnings | | |
-| 110 firmware checks | | |
+| 113 firmware checks | | |
 | Backend test suite | | |
 | C1 store before transmit | | |
 | C2 outage recovery | | |

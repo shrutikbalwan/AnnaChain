@@ -106,6 +106,33 @@ static void test_record_format() {
   CHECK(recordFormat(v2, sizeof v2) == 0, "a later format is not mistaken for v1");
 }
 
+// ── 2c. an invented value says it was invented ───────────────────────────
+// The board has no ethylene sensor. The simulator can invent a curve for one
+// (dump/fleet --ethylene), and the record must say so, inside the signature,
+// or no one downstream can tell a demonstration from a measurement.
+static void test_simulated_flag() {
+  head("Invented ethylene is flagged as simulated, inside the signature");
+  for (int fitted = 0; fitted < 2; ++fitted) {
+    SimClock clk{1790294400u}; SimSensors sns{2}; MemStore st{64};
+    SoftSigner sg; SimServer srv; SimLink ln{srv, sg};
+    sns.setEthyleneFitted(fitted == 1);
+    Node n{0x5001, clk, sns, st, ln, sg};
+    n.begin();
+    for (int i = 0; i < 5; ++i) { n.tick(); clk.advance(300); }
+    bool all = true, none = true;
+    for (uint32_t s = 1; s <= 5; ++s) {
+      uint8_t raw[kRecBytes]; st.read(s, raw);
+      Record r; decode(raw, r);
+      if (r.flags & FLAG_SIMULATED) none = false; else all = false;
+    }
+    if (fitted) CHECK(all, "--ethylene: every record carries FLAG_SIMULATED (bit 6)");
+    else        CHECK(none, "no ethylene: no record carries FLAG_SIMULATED");
+  }
+  CHECK(FLAG_SIMULATED == 0x40 && !(FLAG_SIMULATED & (FLAG_TAMPER | FLAG_MOVED |
+        FLAG_CHARGING | FLAG_COLD | FLAG_SELFTEST | FLAG_SENSORBAD)),
+        "bit 6, clear of the six flags already in use");
+}
+
 // ── a small rig, so each test starts clean ────────────────────────────────
 struct Rig {
   SimClock   clk{1758758400u};
@@ -735,6 +762,7 @@ int main() {
   test_sha256();
   test_record();
   test_record_format();
+  test_simulated_flag();
   test_store_first();
   test_outage_gap_fill();
   test_link_dies_mid_catchup();

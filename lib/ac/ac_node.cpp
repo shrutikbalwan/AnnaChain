@@ -47,7 +47,8 @@ void Node::tick() {
                        (v.charging ? FLAG_CHARGING  : 0) |
                        (v.temp < 0 ? FLAG_COLD      : 0) |
                        (first_     ? FLAG_SELFTEST  : 0) |
-                       (!v.ok      ? FLAG_SENSORBAD : 0));
+                       (!v.ok      ? FLAG_SENSORBAD : 0) |
+                       (v.simulated ? FLAG_SIMULATED : 0));
   // A reading the sensor refused to give is still recorded, but it is marked.
   // Without this the server cannot tell a dead SHT40 from a genuine 0.00 C.
   memcpy(r.prev, prev_, 32);
