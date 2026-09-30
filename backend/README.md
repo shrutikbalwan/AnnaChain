@@ -312,14 +312,20 @@ accurate.
   handed upstream unchanged and in order; a notice lost to gateway overrun is
   counted (`gapsDropped`). `backend/tests/test_gateway_gap_e2e.py` runs the
   C++ node and gateway and checks what the buyer sees.
-- **Records the gateway itself drops are not declared.** When the *gateway's*
-  buffer overruns (the node was in LoRa range but the cab had no signal for
-  longer than the gateway can hold), the lost records are counted on the
-  gateway, but nothing signed tells the server. The node has already been
-  acknowledged hop-by-hop, so it does not resend, and the server waits for the
-  first missing sequence number. Closing this needs the node to reconcile
-  against the server's last-ACK through the gateway, which the LoRa path does
-  not do yet.
+- **Records the gateway itself loses are resent** (done, in the simulator).
+  When the *gateway's* buffer overruns (the cab had no signal for longer than
+  it can hold) or is lost (a cab power cut: it is RAM), the node is no longer
+  left believing its hop-by-hop acks. It asks the gateway what the server has;
+  the gateway answers with the server's own last-ACK, asked at that moment and
+  extended only over frames it still holds (`lib/ac/ac_gateway.h`), so the node
+  resends from the first record the server is missing. If the node's own flash
+  has wrapped past those records too, the node declares them lost with a signed
+  gap notice, as for any other hole. Nothing relies on the gateway's `dropped`
+  counter: it is unsigned and is not evidence of anything, so it is never sent
+  to the server. While the cab has no signal the gateway answers "no value" and
+  the node carries on; recovery happens once the uplink is back. Proved in
+  `tools/selftest.cpp`; on the radio it is `lib/ac/ac_lora.*`, which is
+  UNPROVEN like the rest of that driver.
 - **Clock checks are bounds, not a time source.** A reading more than 60 s
   ahead of the server, more than 30 days old, or earlier than the reading
   before it is refused. A clock that is wrong by less than that (a few hours

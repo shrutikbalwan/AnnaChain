@@ -687,6 +687,49 @@ static void test_gateway_relay_no_value_yet() {
         "and the server holds every record, in order");
 }
 
+// ── 14. records the GATEWAY lost are recovered end to end ────────────────
+// The crate is in LoRa range, the cab has no signal for longer than the
+// gateway's buffer lasts: the gateway overwrites its oldest frames. The node
+// was acknowledged hop by hop, so on its own it would never resend them, and
+// the server would wait for the first missing record for ever. Counting the
+// loss at the gateway is not enough; an unsigned gateway counter is not
+// evidence. The node must be asked for them again, by the server's last-ACK.
+static void test_gateway_overrun_is_recovered() {
+  head("Records the gateway overwrote are resent, because the server says so");
+  SimClock   clk{1758758400u};
+  SimRadio   radio;
+  SoftSigner signer{"overrun-test-device-key"};
+  SimServer  srv;
+  SimLink    uplink{srv, signer};
+  GwBuffer   gbuf{40};                     // deliberately tiny
+  Gateway    gw{0xAA0004, clk, radio, gbuf, uplink};
+  gw.begin(); gw.setBatchSize(20);
+  SimSensors sns{8}; MemStore mem{4096};
+  SimNodeToGateway link{radio};
+  link.attach(&gw, true);                  // the gateway keeps running as the node sends
+  Node node{0x4001, clk, sns, mem, link, signer};
+  node.setBatchSize(20); node.begin();
+
+  uplink.setUp(false);                     // no signal at the cab
+  for (int i = 0; i < 100; ++i) { node.tick(); gw.poll(); clk.advance(300); }
+  CHECK(gw.stats().dropped == 60 && gw.buffered() == 40,
+        "the gateway overwrote 60 records it could not forward");
+  CHECK(srv.held() == 0 && mem.count() == 100, "the server has none; the node has all 100");
+
+  uplink.setUp(true);                      // signal returns
+  bool caughtUp = false;
+  for (int i = 0; i < 10 && !caughtUp; ++i) {
+    node.tick(); gw.poll(); gw.forward(); clk.advance(300);
+    caughtUp = srv.lastAck(0x4001) == mem.lastSeq();
+  }
+  CHECK(caughtUp, "the node resent what the gateway lost, and the server caught up");
+  bool inOrder = true;
+  for (size_t i = 0; i < srv.records().size(); ++i)
+    if (srv.records()[i].seq != i + 1) inOrder = false;
+  CHECK(inOrder && srv.held() == mem.lastSeq() && srv.gaps().empty(),
+        "every record, in order, and no hole declared or left undeclared");
+}
+
 int main() {
   std::printf("\n\033[1mAnnaChain self-tests\033[0m\n");
   test_sha256();
@@ -713,6 +756,7 @@ int main() {
   test_gateway_cannot_forge();
   test_gateway_relays_server_ack();
   test_gateway_relay_no_value_yet();
+  test_gateway_overrun_is_recovered();
 
   std::printf("\n%d checks, %d failed\n", checks, failures);
   std::printf("%s\n\n", failures ? "\033[31mSOMETHING IS WRONG\033[0m"

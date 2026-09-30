@@ -92,10 +92,11 @@ g++ -std=c++17 -Wall -DAC_LOG_CAPACITY=4096 -Ilib/ac $CORE tools/selftest.cpp -o
 ./selftest
 ```
 
-**Expected:** `106 checks, 0 failed` and `ALL GOOD`. (70 originally; 8 were
+**Expected:** `110 checks, 0 failed` and `ALL GOOD`. (70 originally; 8 were
 added for the signed gap notice and the clock base, 14 for gap notices
-crossing the truck gateway, 4 for the frozen v1 record format, and 10 for the
-gateway relaying the server's last-ACK.)
+crossing the truck gateway, 4 for the frozen v1 record format, 10 for the
+gateway relaying the server's last-ACK, and 4 for records the gateway lost
+being resent.)
 
 Read the section names as they scroll. They must include, and all pass:
 
@@ -112,13 +113,14 @@ Read the section names as they scroll. They must include, and all pass:
 - A gap notice is signed by the device — **C4**, **C6**
 - The board's clock starts on the date it claims
 - The sensor stops answering
-- Eleven gateway sections, including **"A declared gap crosses the gateway"**,
+- Twelve gateway sections, including **"A declared gap crosses the gateway"**,
   **"The gateway cannot alter a gap notice"** and **"A gap notice lost to gateway
   overrun is counted"**, **"The gateway cannot make a record up"**, **"The node
   resumes from what the server has, relayed by the gateway"** and **"The gateway
-  has no word from the server yet"** — **C2**, **C4**, **C6**
+  has no word from the server yet"** and **"Records the gateway overwrote are
+  resent, because the server says so"** — **C2**, **C4**, **C6**
 
-**FAIL if:** the count is below 106, anything is red, or a section above is missing.
+**FAIL if:** the count is below 110, anything is red, or a section above is missing.
 
 Then the server's own suite:
 
@@ -318,7 +320,7 @@ Reporting them as bugs is a false positive.
 | **SQLite, not PostgreSQL + TimescaleDB** | Schema is written for the move; `records` is the hypertable candidate |
 | **No ethylene sensor is read** | The field transmits *not fitted*. The part has not been chosen, on purpose |
 | Shelf-life parameters are **not validated** | Literature-typical Q10 values. Every response carries the caveat |
-| `LoraRadio` **receives nothing** | Stub until the SX1262 arrives. The gateway logic above it is fully tested |
+| The SX1262, PN532, ATECC608B and Wi-Fi/NTP drivers are **UNPROVEN** | Written, never compiled for the board, never run on a part: none has arrived (`docs/HIL.md`). The gateway and node logic above them is tested in the simulator |
 | The clock starts from a **compiled-in date** | No NTP or RTC yet; the server's timestamp check is what catches a wrong one |
 | A calibration **registry** does not exist | The check works; there are no real certificates to put in it yet |
 
@@ -429,13 +431,14 @@ half-done, which is worse than absent. `backend/README.md` lists each one, and
 the other remaining limitations, under *Honest about what this is not*.
 
 1. No running Fabric network (adapter only).
-2. A buyer's phone cannot check a signature until the ATECC608B makes it ECDSA.
-3. Records the *gateway* drops on its own overrun are counted there but not
-   declared to the server.
+2. A buyer's phone cannot check a signature until the ATECC608B makes it ECDSA
+   (a record-format change, decided against for now: `docs/CRYPTO.md`).
 
 Done since the first verification, and no longer to be reported as missing:
 backend tests, login back-off, vendored Chart.js, gap notices through the
-gateway.
+gateway, and records the *gateway* loses to its own overrun or a power cut
+(the node is told the server's last-ACK and resends them; selftest sections
+13 and 14).
 
 ---
 
@@ -444,7 +447,7 @@ gateway.
 | Component | Pass / Fail | Evidence |
 |---|---|---|
 | Build, no warnings | | |
-| 106 firmware checks | | |
+| 110 firmware checks | | |
 | Backend test suite | | |
 | C1 store before transmit | | |
 | C2 outage recovery | | |

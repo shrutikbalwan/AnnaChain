@@ -106,7 +106,9 @@ struct GwStats {
   uint32_t received = 0;
   uint32_t duplicates = 0;     // the same record heard twice
   uint32_t forwarded = 0;
-  uint32_t dropped = 0;        // records lost: buffer overran before the uplink came back
+  uint32_t dropped = 0;        // records overwritten: buffer overran before the uplink
+                               // came back. Not evidence (unsigned, never sent up): the
+                               // node resends them when the server's last-ACK says so
   uint32_t batches = 0;
   uint32_t gapsReceived = 0;   // gap notices heard from nodes
   uint32_t gapsForwarded = 0;  // and handed upstream
