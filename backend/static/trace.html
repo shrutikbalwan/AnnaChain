@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AnnaChain — this consignment</title>
+<!--
+  The page a buyer reaches by scanning the carton.
+
+  No external anything: no CDN, no fonts, no analytics. It has to open on a
+  cheap phone on a bad connection at a dock, and it has to open in five years
+  when whatever CDN we would have used is gone.
+-->
+<style>
+  :root{
+    --ink:#16212e; --muted:#5a7480; --rule:#dde5ec; --bg:#f4f7fa; --card:#fff;
+    --navy:#1f3864; --blue:#1f6fb5; --green:#1e7145; --amber:#b06a10;
+    --red:#c00000; --late:#c0500f;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:15px/1.55 "Segoe UI",system-ui,-apple-system,sans-serif}
+  .wrap{max-width:720px;margin:0 auto;padding:0 16px 44px}
+  header{background:var(--navy);color:#fff;padding:18px 16px}
+  header .in{max-width:720px;margin:0 auto}
+  header h1{margin:0;font-size:16px;letter-spacing:.4px;font-weight:700}
+  header .sid{font:12.5px Consolas,monospace;color:#b8c9e0;margin-top:2px}
+
+  .verdict{border-radius:9px;padding:18px 18px 16px;margin:16px 0;color:#fff}
+  .verdict.good{background:var(--green)}
+  .verdict.warn{background:var(--amber)}
+  .verdict.bad{background:var(--red)}
+  .verdict h2{margin:0 0 5px;font-size:21px;line-height:1.25}
+  .verdict p{margin:0;font-size:14px;opacity:.95}
+
+  .card{background:var(--card);border:1px solid var(--rule);border-radius:9px;
+        padding:15px 16px;margin-bottom:14px}
+  .card h3{margin:0 0 11px;font-size:11.5px;text-transform:uppercase;
+           letter-spacing:.7px;color:var(--muted);font-weight:700}
+  .row{display:flex;justify-content:space-between;gap:12px;padding:7px 0;
+       border-bottom:1px solid #eef2f6;font-size:14px}
+  .row:last-child{border-bottom:0}
+  .row span:first-child{color:var(--muted)}
+  .row span:last-child{text-align:right;font-weight:600}
+
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .stat{border:1px solid var(--rule);border-radius:7px;padding:10px;text-align:center}
+  .stat .n{font-size:20px;font-weight:700;line-height:1.15}
+  .stat .k{font-size:10.5px;color:var(--muted);text-transform:uppercase;
+           letter-spacing:.4px;margin-top:2px}
+  canvas{display:block;width:100%;height:210px}
+  .legend{font-size:11.5px;color:var(--muted);margin-top:8px}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;
+      margin:0 5px 0 0;vertical-align:-1px}
+
+  .proof{font:11.5px/1.5 Consolas,monospace;word-break:break-all;
+         background:#f7fafd;border:1px solid var(--rule);border-radius:6px;
+         padding:9px 10px;margin-top:8px}
+  button{background:var(--navy);color:#fff;border:0;border-radius:7px;
+         padding:11px 18px;font-size:14px;font-weight:600;cursor:pointer;
+         width:100%;margin-top:11px}
+  .ok{color:var(--green);font-weight:700}
+  .bad{color:var(--red);font-weight:700}
+  .note{font-size:12.5px;color:var(--muted);line-height:1.5}
+  .gap{background:#fdf5ee;border-left:3px solid var(--late);padding:9px 11px;
+       border-radius:0 5px 5px 0;margin-bottom:8px;font-size:13.5px}
+  footer{text-align:center;color:var(--muted);font-size:11.5px;padding:8px 0 0}
+  .loading{padding:50px 0;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header><div class="in">
+  <h1>AnnaChain</h1>
+  <div class="sid" id="sid">…</div>
+</div></header>
+
+<div class="wrap" id="wrap">
+  <div class="loading">Reading the record…</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const sid = decodeURIComponent(location.pathname.split('/t/')[1] || '');
+$('sid').textContent = sid;
+
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+function chart(cv, pts, lo, hi){
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  g.clearRect(0, 0, w, h);
+
+  const vals = pts.map(p => p.t).filter(v => v !== null);
+  if (!vals.length) return;
+  let min = Math.min(...vals, lo), max = Math.max(...vals, hi);
+  const pad = (max - min) * 0.15 || 1; min -= pad; max += pad;
+  const L = 34, R = 8, T = 10, B = 20;
+  const X = i => L + (w - L - R) * (i / Math.max(pts.length - 1, 1));
+  const Y = v => T + (h - T - B) * (1 - (v - min) / (max - min));
+
+  // the band the load is supposed to stay inside
+  g.fillStyle = 'rgba(30,113,69,.07)';
+  g.fillRect(L, Y(hi), w - L - R, Y(lo) - Y(hi));
+  g.strokeStyle = '#cfdae4'; g.lineWidth = 1; g.setLineDash([4,4]);
+  [lo, hi].forEach(v => { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(w - R, Y(v)); g.stroke(); });
+  g.setLineDash([]);
+
+  g.fillStyle = '#5a7480'; g.font = '10px system-ui, sans-serif';
+  for (let k = 0; k <= 3; k++){
+    const v = min + (max - min) * k / 3;
+    g.fillText(v.toFixed(0), 4, Y(v) + 3);
+  }
+
+  g.lineWidth = 1.8; g.lineJoin = 'round';
+  for (let i = 1; i < pts.length; i++){
+    const a = pts[i-1], b = pts[i];
+    if (a.t === null || b.t === null) continue;
+    const out = b.t < lo || b.t > hi;
+    g.strokeStyle = out ? '#c00000' : (b.late ? '#c0500f' : '#1f6fb5');
+    g.beginPath(); g.moveTo(X(i-1), Y(a.t)); g.lineTo(X(i), Y(b.t)); g.stroke();
+  }
+  g.fillStyle = '#5a7480';
+  g.fillText('°C', L, h - 5);
+}
+
+function render(d){
+  const gaps = d.gaps.length ? d.gaps.map(g =>
+    `<div class="gap"><b>Readings ${g.from}–${g.to} no longer exist.</b>
+      The device ran out of storage before it could send them, and reported
+      exactly which ones were lost rather than quietly closing the gap.</div>`
+  ).join('') : '';
+
+  $('wrap').innerHTML = `
+    <div class="verdict ${d.tone}">
+      <h2>${esc(d.verdict)}</h2>
+      <p>${esc(d.because)}</p>
+    </div>
+
+    <div class="card">
+      <h3>This consignment</h3>
+      <div class="row"><span>What</span><span>${esc(d.commodity)}</span></div>
+      <div class="row"><span>From</span><span>${esc(d.origin)} → ${esc(d.destination)}</span></div>
+      <div class="row"><span>Watched from</span><span>${esc(d.first_seen)}</span></div>
+      <div class="row"><span>Until</span><span>${esc(d.last_seen)}</span></div>
+      <div class="row"><span>Journey</span><span>${d.hours} hours</span></div>
+      <div class="row"><span>Sensors on the truck</span><span>${d.nodes_on_truck || 1}</span></div>
+    </div>
+
+    <div class="card">
+      <h3>Temperature, every 5 minutes</h3>
+      <div class="stats">
+        <div class="stat"><div class="n">${d.min_c}°</div><div class="k">coldest</div></div>
+        <div class="stat"><div class="n">${d.avg_c}°</div><div class="k">average</div></div>
+        <div class="stat"><div class="n" ${d.max_c > d.limit_hi ? 'style="color:#c00000"' : ''}>${d.max_c}°</div><div class="k">warmest</div></div>
+      </div>
+      <canvas id="cv"></canvas>
+      <p class="legend">
+        <span class="sw" style="background:#1f6fb5"></span>within ${d.limit_lo}–${d.limit_hi} °C
+        &nbsp;<span class="sw" style="background:#c00000"></span>outside it
+        &nbsp;<span class="sw" style="background:#c0500f"></span>recorded with no signal, sent later
+      </p>
+      <div class="row" style="margin-top:6px"><span>Time outside range</span>
+        <span>${d.minutes_out ? d.minutes_out + ' minutes' : 'none'}</span></div>
+      ${d.sensor_faults ? `<div class="row"><span>Readings the sensor could not give</span>
+        <span>${d.sensor_faults}</span></div>` : ''}
+    </div>
+
+    ${gaps ? `<div class="card"><h3>Gaps, declared</h3>${gaps}</div>` : ''}
+
+    <div class="card">
+      <h3>Check it yourself</h3>
+      <div class="row"><span>Readings in the record</span><span>${d.readings}</span></div>
+      <div class="row"><span>Chain unbroken</span>
+        <span class="${d.chain_ok ? 'ok' : 'bad'}">${d.chain_ok ? 'yes' : 'NO — altered at ' + d.broken_at}</span></div>
+      <div class="proof" id="root">${d.merkle_root || '—'}</div>
+      <button id="btn">Re-check every reading now</button>
+      <div class="note" id="vout" style="margin-top:10px">
+        Each reading carries a fingerprint of the one before it, signed inside
+        the device at the moment it was taken. Pressing the button downloads
+        the signed readings themselves and walks the chain here, on this
+        phone, without asking our server whether it is whole.
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>What this does not tell you</h3>
+      <p class="note">
+        It shows what the sensors recorded and proves the record has not been
+        changed since. It does not certify that the food is safe to eat — that
+        is a judgement for whoever is holding it, and for the inspection
+        regime that covers it.<br><br>
+        The fingerprint above is the value that gets anchored to a ledger.
+        ${d.anchored
+          ? 'It has been recorded locally; publication to the ledger network is not yet live.'
+          : 'It has not been anchored for this consignment yet.'}
+      </p>
+    </div>
+
+    <footer>AnnaChain · SIH 2026 · PS 26232</footer>`;
+
+  chart($('cv'), d.series, d.limit_lo, d.limit_hi);
+  addEventListener('resize', () => chart($('cv'), d.series, d.limit_lo, d.limit_hi));
+
+  $('btn').onclick = async () => {
+    $('btn').textContent = 'Checking…'; $('btn').disabled = true;
+    let mine, server;
+    try{
+      mine = await walkHere(d);
+    }catch(e){
+      mine = {ok: false, n: 0, error: 'Could not download the signed readings.'};
+    }
+    try{
+      // The one place a cached answer is worthless: always the full walk.
+      server = await (await fetch('/api/verify/' + d.device + '?full=true')).json();
+    }catch(e){ server = null; }
+    $('vout').innerHTML = report(mine, server);
+    $('btn').textContent = 'Re-check every reading now'; $('btn').disabled = false;
+  };
+}
+
+// ── the buyer's own check ─────────────────────────────────────────────────
+// Fetch the 84-byte records exactly as the device signed them, and re-derive
+// the chain in this browser: every record's SHA-256, that each carries the
+// digest of the one before, that no reading is missing without a declared gap,
+// and that every temperature this page shows is the one that was signed.
+// backend/tests/test_public_verify.py holds a line-for-line Python copy of this
+// walk, and checks that it agrees with the server.
+
+function hexBytes(h){
+  const a = new Uint8Array(h.length / 2);
+  for (let i = 0; i < a.length; i++) a[i] = parseInt(h.substr(i * 2, 2), 16);
+  return a;
+}
+function same(a, b){
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+async function sha256(bytes){
+  // WebCrypto where the browser offers it (HTTPS, localhost); a plain
+  // implementation otherwise, because a phone at a dock on http:// still
+  // deserves to be able to check.
+  if (window.crypto && crypto.subtle && crypto.subtle.digest)
+    return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return sha256js(bytes);
+}
+
+function sha256js(msg){
+  const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  const H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const l = msg.length, n = ((l + 9 + 63) >> 6) << 6;
+  const m = new Uint8Array(n); m.set(msg); m[l] = 0x80;
+  const bits = l * 8;
+  for (let i = 0; i < 4; i++) m[n - 1 - i] = (bits >>> (8 * i)) & 255;
+  const w = new Uint32Array(64), r = (x, s) => (x >>> s) | (x << (32 - s));
+  for (let o = 0; o < n; o += 64){
+    for (let i = 0; i < 16; i++)
+      w[i] = (m[o+4*i] << 24) | (m[o+4*i+1] << 16) | (m[o+4*i+2] << 8) | m[o+4*i+3];
+    for (let i = 16; i < 64; i++){
+      const s0 = r(w[i-15], 7) ^ r(w[i-15], 18) ^ (w[i-15] >>> 3);
+      const s1 = r(w[i-2], 17) ^ r(w[i-2], 19) ^ (w[i-2] >>> 10);
+      w[i] = (w[i-16] + s0 + w[i-7] + s1) | 0;
+    }
+    let [a, b, c, d, e, f, g, h] = H;
+    for (let i = 0; i < 64; i++){
+      const t1 = (h + (r(e, 6) ^ r(e, 11) ^ r(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;
+      const t2 = ((r(a, 2) ^ r(a, 13) ^ r(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+    H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+  }
+  const out = new Uint8Array(32);
+  H.forEach((v, i) => { out[4*i] = v >>> 24; out[4*i+1] = (v >>> 16) & 255;
+                        out[4*i+2] = (v >>> 8) & 255; out[4*i+3] = v & 255; });
+  return out;
+}
+
+async function walkHere(d){
+  let recs = [], page, offset = 0;
+  do {
+    page = await (await fetch('/api/records/' + encodeURIComponent(d.shipment)
+                               + '?offset=' + offset + '&limit=2000')).json();
+    recs = recs.concat(page.records);
+    offset += page.records.length;
+  } while (offset < page.total && page.records.length);
+
+  const gapsTo = new Map(page.gaps.map(g => [g.to, g.from]));
+  const shown = new Map(d.series.map(p => [p.seq, p]));
+  let prevSeq = 0, prevDigest = new Uint8Array(32), n = 0;
+  const fail = (seq, why) => ({ok: false, at: seq, why, n});
+
+  for (const rec of recs){
+    if (!rec.raw || rec.raw.length !== 168) return fail(rec.seq, 'the original bytes are missing');
+    const raw = hexBytes(rec.raw);
+    const dv = new DataView(raw.buffer);
+    const seq = dv.getUint32(4, true), temp = dv.getInt16(12, true), flags = raw[18];
+    if (seq !== rec.seq) return fail(rec.seq, 'its sequence number does not match');
+    const afterGap = gapsTo.get(seq - 1) === prevSeq + 1;
+    if (seq !== prevSeq + 1 && !afterGap)
+      return fail(seq, 'a reading before it is missing and was never declared lost');
+    if (!afterGap && !same(raw.subarray(20, 52), prevDigest))
+      return fail(seq, 'it does not follow reading ' + prevSeq);
+    const p = shown.get(seq);
+    if (p){
+      const want = (flags & 32) ? null : temp / 100;
+      if ((p.t === null) !== (want === null) ||
+          (want !== null && Math.abs(p.t - want) > 0.005))
+        return fail(seq, 'this page shows ' + p.t + ' °C, but the device signed '
+                         + (want === null ? 'a sensor fault' : want.toFixed(2) + ' °C'));
+    }
+    prevSeq = seq; prevDigest = await sha256(raw.subarray(0, 52)); n++;
+  }
+  return {ok: true, n, gaps: page.gaps.length};
+}
+
+function report(mine, server){
+  let html;
+  if (mine.error){
+    html = `<p><span class="bad">${esc(mine.error)}</span></p>`;
+  } else if (mine.ok){
+    html = `<p><span class="ok">Checked here: all ${mine.n} readings chain together.</span>
+      Their fingerprints were recomputed on this device just now, every link
+      matches the reading before it${mine.gaps ? ' (apart from the declared gaps above)' : ''},
+      and every temperature on this page is the one the device signed.</p>`;
+  } else {
+    html = `<p><span class="bad">Checked here: reading ${mine.at} fails.</span>
+      ${esc(mine.why)}. The ${mine.n} readings before it chain together.</p>`;
+  }
+  if (server){
+    html += server.ok
+      ? `<p><span class="ok">Checked by our server: all ${server.records} signatures hold.</span></p>`
+      : `<p><span class="bad">Checked by our server: reading ${server.broken_at} fails</span>
+         (${esc(server.detail || server.reason)}).</p>`;
+  } else {
+    html += `<p>Our server could not be reached for its signature check.</p>`;
+  }
+  html += `<p class="note">What this phone cannot check is the signature itself.
+    Today it is an HMAC, and anyone holding the key to check it could also
+    forge it, so we do not hand the key out; that check happens on our server,
+    which means you are trusting us for it. When the ATECC608B secure element
+    is fitted the signature becomes ECDSA, the device's public key can be
+    published, and this page will check every signature too. That is why the
+    secure element is in the bill of materials.</p>`;
+  return html;
+}
+
+fetch('/api/trace/' + encodeURIComponent(sid))
+  .then(r => r.ok ? r.json() : Promise.reject(r.status))
+  .then(render)
+  .catch(e => {
+    $('wrap').innerHTML = `<div class="card"><h3>Not found</h3>
+      <p class="note">No consignment with the code <b>${esc(sid)}</b>.
+      Check the code printed under the QR on the carton.</p></div>`;
+  });
+</script>
+</body>
+</html>

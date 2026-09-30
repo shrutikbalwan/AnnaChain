@@ -1,0 +1,11 @@
+.pio/
+demo
+selftest
+dump
+*.capture
+records.jsonl
+*.exe
+backend/annachain.db*
+backend/ledger.jsonl
+__pycache__/
+.pytest_cache/

@@ -1,0 +1,70 @@
+// AnnaChain — one sensor record, and the chain it belongs to.
+//
+// A record is the unit of everything: it is built, hashed onto the previous
+// one, signed inside the device, and only then written to flash. Nothing
+// leaves the node that has not already been stored.
+#pragma once
+#include <stdint.h>
+#include <stddef.h>
+
+namespace ac {
+
+// Wire layout, little-endian, fixed size so the flash log can be indexed by
+// sequence number without a table of contents.
+//   device   4
+//   seq      4
+//   ts       4
+//   temp     2   deci-hundredths of a degree C, signed  (2350 = 23.50 C)
+//   rh       2   hundredths of a percent                 (6512 = 65.12 %)
+//   c2h4     2   parts per billion, 0xFFFF = sensor not fitted
+//   flags    1
+//   batt     1   percent
+//   prev    32   SHA-256 of the previous record
+//   sig     32   signature over the 52 bytes above
+constexpr size_t kBodyBytes = 52;
+constexpr size_t kRecBytes  = 84;
+
+enum Flags : uint8_t {
+  FLAG_TAMPER   = 1 << 0,  // enclosure opened
+  FLAG_MOVED    = 1 << 1,  // accelerometer above threshold
+  FLAG_CHARGING = 1 << 2,  // solar input present
+  FLAG_COLD     = 1 << 3,  // below 0 C — charging inhibited
+  FLAG_SELFTEST  = 1 << 4,  // first record after power-up
+  FLAG_SENSORBAD = 1 << 5,  // the sensor did not answer — this reading is not a measurement
+};
+
+constexpr uint16_t kEthyleneNotFitted = 0xFFFF;
+
+struct Record {
+  uint32_t device = 0;
+  uint32_t seq    = 0;
+  uint32_t ts     = 0;
+  int16_t  temp   = 0;
+  uint16_t rh     = 0;
+  uint16_t c2h4   = kEthyleneNotFitted;
+  uint8_t  flags  = 0;
+  uint8_t  batt   = 0;
+  uint8_t  prev[32] = {0};
+  uint8_t  sig[32]  = {0};
+
+  double tempC()    const { return temp / 100.0; }
+  double humidity() const { return rh   / 100.0; }
+};
+
+// Serialise everything except the signature. This is what gets hashed and
+// what gets signed — two different devices must produce identical bytes for
+// identical readings, so the layout is explicit rather than a struct dump.
+void encodeBody(const Record& r, uint8_t out[kBodyBytes]);
+void encode(const Record& r, uint8_t out[kRecBytes]);
+bool decode(const uint8_t in[kRecBytes], Record& out);
+
+// SHA-256 over the body. This is the value the *next* record carries in prev[].
+void digest(const Record& r, uint8_t out[32]);
+
+// What a gap notice is signed over. A notice that records no longer exist is a
+// claim about the record, so it has to come from the device just as a record
+// does. Otherwise anyone who can reach the server can punch a hole in a
+// consignment and call it an outage.
+void gapDigest(uint32_t device, uint32_t from, uint32_t to, uint8_t out[32]);
+
+}  // namespace ac

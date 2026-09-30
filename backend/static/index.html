@@ -1,0 +1,714 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AnnaChain — live</title>
+<style>
+  :root{
+    --navy:#1f3864; --ink:#16212e; --muted:#5a7480; --rule:#dbe4ec;
+    --bg:#f4f7fa; --card:#fff; --blue:#1f6fb5; --green:#1e7145;
+    --orange:#c0500f; --red:#c00000; --soft:#eef4fa;
+  }
+  *{box-sizing:border-box}
+  /* A class that sets `display` outranks the browser's own [hidden] rule, so
+     `el.hidden = true` sets the attribute and changes nothing on screen. This
+     one line is what makes hiding work. */
+  [hidden]{display:none!important}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.5 "Segoe UI",system-ui,sans-serif}
+  header{background:var(--navy);color:#fff;padding:14px 22px;
+         display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  header h1{margin:0;font-size:17px;font-weight:700;letter-spacing:.2px}
+  header .sub{color:#b8c9e0;font-size:12.5px}
+  .pill{margin-left:auto;padding:5px 14px;border-radius:999px;
+        font-size:12.5px;font-weight:700;letter-spacing:.3px}
+  .pill.live{background:#1e7145}
+  .pill.silent{background:var(--orange);animation:blink 1.1s infinite}
+  .pill.catching{background:#0d6ea8}
+  .pill.waiting{background:#5a7480}
+  @keyframes blink{50%{opacity:.45}}
+  main{padding:18px 22px;max-width:1500px;margin:0 auto}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));
+         gap:12px;margin-bottom:16px}
+  .tile{background:var(--card);border:1px solid var(--rule);border-radius:7px;
+        padding:12px 14px}
+  .tile .n{font-size:26px;font-weight:700;line-height:1.1}
+  .tile .k{font-size:11.5px;color:var(--muted);text-transform:uppercase;
+           letter-spacing:.5px;margin-top:3px}
+  .grid{display:grid;grid-template-columns:2fr 1fr;gap:16px}
+  @media(max-width:1000px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--rule);border-radius:7px;
+        padding:14px 16px;margin-bottom:16px}
+  .card h2{margin:0 0 10px;font-size:13px;text-transform:uppercase;
+           letter-spacing:.6px;color:var(--navy)}
+  .legend{font-size:11.5px;color:var(--muted);margin:6px 0 0}
+  .swatch{display:inline-block;width:10px;height:10px;border-radius:2px;
+          margin:0 4px 0 12px;vertical-align:-1px}
+  .alert{border-left:3px solid var(--rule);padding:7px 10px;margin-bottom:7px;
+         background:var(--soft);border-radius:0 4px 4px 0}
+  .alert.high{border-left-color:var(--red);background:#fdf0ee}
+  .alert.medium{border-left-color:var(--orange);background:#fdf5ee}
+  .alert.info{border-left-color:var(--blue);background:#eef4fa}
+  .alert .h{font-weight:700;font-size:12px;text-transform:uppercase;
+            letter-spacing:.4px;margin-bottom:2px}
+  .alert .m{font-size:12.5px}
+  .alert .t{font-size:11px;color:var(--muted);margin-top:3px}
+  .empty{color:var(--muted);font-size:12.5px;padding:8px 0}
+  button{background:var(--navy);color:#fff;border:0;border-radius:5px;
+         padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer}
+  button.ghost{background:#fff;color:var(--navy);border:1px solid var(--navy)}
+  button:disabled{opacity:.5;cursor:default}
+  code{font:12px/1.5 Consolas,monospace;word-break:break-all;color:var(--ink)}
+  .kv{display:flex;justify-content:space-between;gap:10px;padding:4px 0;
+      border-bottom:1px dotted var(--rule);font-size:12.5px}
+  .kv:last-child{border-bottom:0}
+  .kv span:first-child{color:var(--muted)}
+  .ok{color:var(--green);font-weight:700}
+  .bad{color:var(--red);font-weight:700}
+  .note{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.45}
+  canvas{display:block;width:100%!important}
+  #chartT{height:250px!important}
+  #chartE{height:140px!important}
+  #chartN{height:200px!important}
+  .nodes{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+         gap:10px;margin-top:10px}
+  .node{border:1px solid var(--rule);border-radius:6px;padding:9px 11px}
+  .node.suspect{border-color:var(--red);background:#fdf0ee}
+  .node .nm{font-size:12px;font-weight:700}
+  .node .tv{font-size:19px;font-weight:700;margin-top:2px}
+  .node .dv{font-size:11px;color:var(--muted)}
+  .badge{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.4px;
+         padding:2px 7px;border-radius:999px;background:var(--red);color:#fff;
+         margin-left:6px;vertical-align:1px}
+  /* login */
+  .gate{position:fixed;inset:0;background:var(--bg);display:flex;
+        align-items:center;justify-content:center;z-index:50}
+  .gate form{background:#fff;border:1px solid var(--rule);border-radius:9px;
+             padding:26px 26px 22px;width:330px;box-shadow:0 6px 26px rgba(20,40,70,.09)}
+  .gate h2{margin:0 0 3px;font-size:19px;color:var(--navy)}
+  .gate p{margin:0 0 17px;font-size:12.5px;color:var(--muted);line-height:1.45}
+  .gate label{display:block;font-size:11.5px;color:var(--muted);margin:10px 0 4px;
+              text-transform:uppercase;letter-spacing:.5px;font-weight:700}
+  .gate input{width:100%;padding:9px 11px;border:1px solid var(--rule);
+              border-radius:6px;font-size:14px}
+  .gate button{width:100%;margin-top:16px;padding:10px}
+  .gate .err{color:var(--red);font-size:12.5px;margin-top:10px;min-height:17px}
+  /* fleet */
+  select{padding:6px 10px;border:1px solid rgba(255,255,255,.35);border-radius:6px;
+         background:rgba(255,255,255,.1);color:#fff;font-size:12.5px;max-width:260px}
+  select option{color:#16212e}
+  header .right{margin-left:auto;display:flex;align-items:center;gap:10px}
+  .linkish{background:none;border:0;color:#b8c9e0;font-size:12px;cursor:pointer;
+           padding:0;text-decoration:underline}
+  .life{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+</style>
+</head>
+<body>
+
+<div class="gate" id="gate" hidden>
+  <form id="loginForm">
+    <h2>AnnaChain</h2>
+    <p>Operations dashboard. The buyer's trace page is public; this is not —
+       it shows who is shipping what.</p>
+    <label for="u">Username</label>
+    <input id="u" autocomplete="username" autofocus>
+    <label for="p">Password</label>
+    <input id="p" type="password" autocomplete="current-password">
+    <button type="submit">Sign in</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+</div>
+
+<header>
+  <div>
+    <h1>AnnaChain</h1>
+    <div class="sub" id="sub">waiting for a node…</div>
+  </div>
+  <div class="right">
+    <select id="shipSel" title="consignment"></select>
+    <div class="pill waiting" id="pill">WAITING</div>
+    <button class="linkish" id="signout">sign out</button>
+  </div>
+</header>
+
+<main>
+  <div class="tiles">
+    <div class="tile"><div class="n" id="t-stored">0</div><div class="k">records stored</div></div>
+    <div class="tile"><div class="n" id="t-rec" style="color:var(--orange)">0</div><div class="k">recovered after outage</div></div>
+    <div class="tile"><div class="n" id="t-lost" style="color:var(--red)">0</div><div class="k">declared lost</div></div>
+    <div class="tile"><div class="n" id="t-alerts">0</div><div class="k">open alerts</div></div>
+    <div class="tile"><div class="n" id="t-chain">—</div><div class="k">chain status</div></div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>Temperature &amp; humidity — by the time the reading was taken</h2>
+        <canvas id="chartT"></canvas>
+        <p class="legend">
+          <span class="swatch" style="background:#1f6fb5"></span>arrived live
+          <span class="swatch" style="background:#c0500f"></span>held on the device, delivered late
+          <span class="swatch" style="background:#9fb3c8"></span>humidity
+        </p>
+      </div>
+
+      <div class="card" id="lifeCard" hidden>
+        <h2>Shelf life and what happened</h2>
+        <div class="life" id="lifeStats"></div>
+        <div class="alert info" id="diag" style="margin-top:12px"></div>
+        <p class="note" id="lifeNote"></p>
+      </div>
+
+      <div class="card" id="truckCard" hidden>
+        <h2>All nodes on this truck</h2>
+        <canvas id="chartN"></canvas>
+        <div class="nodes" id="nodeList"></div>
+        <p class="note" id="truckNote"></p>
+      </div>
+
+      <div class="card">
+        <h2>Ethylene</h2>
+        <canvas id="chartE"></canvas>
+        <p class="note" id="e-note"></p>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>Alerts</h2>
+        <div id="alerts"><div class="empty">Nothing yet.</div></div>
+      </div>
+
+      <div class="card">
+        <h2>Proof</h2>
+        <div class="kv"><span>records in chain</span><span id="v-n">—</span></div>
+        <div class="kv"><span>every link verifies</span><span id="v-ok">—</span></div>
+        <div class="kv"><span>declared gaps</span><span id="v-gaps">—</span></div>
+        <div style="margin:10px 0 6px;font-size:11.5px;color:var(--muted)">
+          MERKLE ROOT — this is the value that goes on-chain
+        </div>
+        <code id="v-root">—</code>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+          <button id="btn-verify">Re-verify chain</button>
+          <button class="ghost" id="btn-anchor">Anchor</button>
+          <button class="ghost" id="btn-epcis">GS1 EPCIS</button>
+          <button class="ghost" id="btn-trace">What the buyer sees</button>
+          <button class="ghost" id="btn-label">Crate label</button>
+        </div>
+        <p class="note">Re-verify walks every stored record and re-derives it
+          from the bytes the device signed — digest, signature, chain link and
+          every displayed value. It does not trust the database's own columns,
+          and neither does the status that refreshes on its own. Anchoring records
+          the root locally; Hyperledger Fabric submission is not wired yet, and
+          the response says so.</p>
+      </div>
+
+      <div class="card">
+        <h2>Refused at the door</h2>
+        <div id="rejects"><div class="empty">Nothing refused.</div></div>
+        <p class="note">A record that fails any of the eight checks never
+          reaches the database, and the reason is kept.</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// Everything on this page needs a session except the buyer's trace page, which
+// is on its own route and deliberately open. The token lives in sessionStorage,
+// so closing the tab ends the session — a shared laptop at a dock should not
+// stay signed in.
+let TOKEN = null;
+try { TOKEN = sessionStorage.getItem('ac_token'); } catch(e) {}
+let DEVICE = null;                 // which consignment is on screen
+
+async function api(path, opts = {}) {
+  const o = {...opts, headers: {...(opts.headers || {})}};
+  if (TOKEN) o.headers['Authorization'] = 'Bearer ' + TOKEN;
+  const r = await fetch(path, o);
+  if (r.status === 401) { showGate(); throw new Error('signed out'); }
+  return r;
+}
+
+function showGate(msg){
+  TOKEN = null;
+  try { sessionStorage.removeItem('ac_token'); } catch(e) {}
+  $('gate').hidden = false;
+  if (msg) $('loginErr').textContent = msg;
+}
+
+$('loginForm').onsubmit = async (e) => {
+  e.preventDefault();
+  $('loginErr').textContent = '';
+  const r = await fetch('/api/login', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: $('u').value, password: $('p').value}),
+  });
+  if (!r.ok) { $('loginErr').textContent = 'Wrong username or password.'; return; }
+  const j = await r.json();
+  TOKEN = j.token;
+  try { sessionStorage.setItem('ac_token', TOKEN); } catch(e) {}
+  $('gate').hidden = true;
+  $('p').value = '';
+  loadShipments(); tick(); verify();
+};
+
+$('signout').onclick = async () => {
+  try { await api('/api/logout', {method: 'POST'}); } catch(e) {}
+  showGate('Signed out.');
+};
+
+// ── the fleet: several consignments, not one ────────────────────────────
+async function loadShipments(){
+  let j;
+  try { j = await (await api('/api/shipments')).json(); } catch(e) { return; }
+  const sel = $('shipSel');
+  if (!j.shipments.length) { sel.innerHTML = ''; return; }
+  const sig = j.shipments.map(s => s.device + (s.suspect ? '!' : '')).join(',');
+  if (sel.dataset.sig !== sig){
+    sel.dataset.sig = sig;
+    sel.innerHTML = j.shipments.map(s =>
+      `<option value="${s.device}">${s.shipment_id} · ${s.label || ''}`
+      + `${s.suspect ? ' · SUSPECT' : ''}${s.alerts ? ' · ' + s.alerts + ' alerts' : ''}`
+      + `</option>`).join('');
+    if (DEVICE) sel.value = DEVICE;
+  }
+  if (!DEVICE) DEVICE = j.shipments[0].device;
+}
+
+$('shipSel').onchange = () => {
+  DEVICE = Number($('shipSel').value);
+  lastSeq = -1; truckSig = '';
+  tick(); verify();
+};
+const LIVE = '#1f6fb5', LATE = '#c0500f';
+let chartT, chartE, lastSeq = -1;
+let lateFlags = [];        // per point: was this record held on the device?
+let chartN, truckSig = '';
+const NODE_COLOURS = ['#1f6fb5', '#7a4e9b', '#1e7145', '#0d6ea8', '#8a6d3b'];
+
+function fmtClock(ts){
+  const d = new Date(ts * 1000);
+  return d.toISOString().slice(5, 16).replace('T', ' ');
+}
+
+function makeCharts(){
+  const common = {
+    responsive:true, animation:false, maintainAspectRatio:false,
+    interaction:{mode:'index', intersect:false},
+    plugins:{legend:{display:false}, tooltip:{callbacks:{
+      title:(it)=> it[0]?.label ?? '',
+    }}},
+    elements:{point:{radius:0}},
+    scales:{x:{ticks:{maxTicksLimit:9, font:{size:10}}, grid:{display:false}},
+            y:{ticks:{font:{size:10}}, grid:{color:'#eef2f6'}}}
+  };
+
+  chartT = new Chart($('chartT'), {
+    type:'line',
+    data:{labels:[], datasets:[
+      { label:'temp', data:[], borderWidth:1.8, tension:.25, yAxisID:'y',
+        // each segment is coloured by whether that record arrived late
+        segment:{borderColor: ctx => lateFlags[ctx.p1DataIndex] ? LATE : LIVE},
+        borderColor: LIVE, spanGaps:false },
+      { label:'rh', data:[], borderWidth:1, tension:.25, yAxisID:'y2',
+        borderColor:'#9fb3c8' },
+      { label:'min', data:[], borderWidth:1, borderDash:[4,4],
+        borderColor:'#c9d6e2', yAxisID:'y' },
+      { label:'max', data:[], borderWidth:1, borderDash:[4,4],
+        borderColor:'#c9d6e2', yAxisID:'y' },
+    ]},
+    options:{...common, scales:{
+      x: common.scales.x,
+      y: {...common.scales.y, position:'left',
+          title:{display:true, text:'°C', font:{size:10}}},
+      y2:{position:'right', grid:{display:false},
+          ticks:{font:{size:10}}, title:{display:true, text:'%RH', font:{size:10}}},
+    }}
+  });
+
+  chartE = new Chart($('chartE'), {
+    type:'line',
+    data:{labels:[], datasets:[
+      { label:'ethylene', data:[], borderWidth:1.6, tension:.25,
+        borderColor:'#1e7145', backgroundColor:'rgba(30,113,69,.10)',
+        fill:true }
+    ]},
+    options:{...common, scales:{x:common.scales.x,
+      y:{...common.scales.y, title:{display:true, text:'ppb', font:{size:10}}}}}
+  });
+}
+
+function draw(s){
+  const pill = $('pill');
+  const cls = {live:'live', silent:'silent', 'catching up':'catching', waiting:'waiting'}[s.status];
+  pill.className = 'pill ' + cls;
+  pill.textContent = s.status.toUpperCase();
+  $('sub').textContent =
+    (s.shipment ? `${s.shipment.shipment_id} · ${s.shipment.commodity} · ${s.shipment.origin} → ${s.shipment.destination} · ` : '')
+    + s.detail;
+
+  $('t-stored').textContent = s.stored;
+  $('t-rec').textContent    = s.recovered;
+  $('t-lost').textContent   = s.declared_lost;
+  $('t-alerts').textContent = s.alerts.filter(a => a.severity !== 'info').length;
+
+  // charts — only redraw when something new arrived
+  if (s.series.length && s.series[s.series.length-1].seq !== lastSeq){
+    lastSeq = s.series[s.series.length-1].seq;
+    const lo = s.shipment ? s.shipment.min_c : 2, hi = s.shipment ? s.shipment.max_c : 8;
+    if (!chartT){ drawPlain(s, lo, hi); return; }
+    const labels = s.series.map(p => fmtClock(p.ts));
+
+    lateFlags = s.series.map(p => p.lag > 0);
+    chartT.data.labels = labels;
+    chartT.data.datasets[0].data = s.series.map(p => p.t);
+    chartT.data.datasets[1].data = s.series.map(p => p.h);
+    chartT.data.datasets[2].data = s.series.map(()  => lo);
+    chartT.data.datasets[3].data = s.series.map(()  => hi);
+    chartT.update('none');
+
+    const hasE = s.series.some(p => p.e !== null);
+    chartE.data.labels = labels;
+    chartE.data.datasets[0].data = s.series.map(p => p.e);
+    chartE.update('none');
+    $('e-note').textContent = hasE
+      ? 'Ethylene as this node reported it. The current board has no ethylene sensor, so on today\'s hardware these values can only come from the simulator run with --ethylene: treat them as a demonstration, not a measurement.'
+      : 'No ethylene sensor fitted on this node. The field is transmitted as “not fitted” rather than as a zero.';
+  }
+
+  // alerts
+  const box = $('alerts');
+  if (!s.alerts.length){
+    box.innerHTML = '<div class="empty">Nothing yet.</div>';
+  } else {
+    box.innerHTML = s.alerts.map(a => `
+      <div class="alert ${a.severity}">
+        <div class="h">${a.kind.replace(/_/g,' ')}</div>
+        <div class="m">${a.message}</div>
+        <div class="t">${a.seq ? 'record ' + a.seq + ' · ' : ''}${new Date(a.created*1000).toLocaleTimeString()}</div>
+      </div>`).join('');
+  }
+
+  if (s.truck) loadTruck(s.truck);
+
+  const rj = $('rejects');
+  rj.innerHTML = s.rejects.length
+    ? s.rejects.map(r => `<div class="alert high"><div class="h">refused</div>
+        <div class="m">record ${r.seq} — ${r.reason}</div></div>`).join('')
+    : '<div class="empty">Nothing refused.</div>';
+}
+
+async function loadTruck(truck){
+  let t;
+  try { t = await (await api('/api/truck/' + encodeURIComponent(truck))).json(); }
+  catch(e){ return; }
+  if (!t.nodes || t.nodes.length < 2) return;      // one node: nothing to compare
+
+  $('truckCard').hidden = false;
+  const med = t.median;
+
+  $('nodeList').innerHTML = t.nodes.map((n, i) => {
+    const dev = (n.latest !== null && med !== null) ? (n.latest - med) : null;
+    return `<div class="node ${n.suspect ? 'suspect' : ''}">
+      <div class="nm"><span style="color:${n.suspect ? '#c00000' : NODE_COLOURS[i % 5]}">\u25cf</span>
+        ${n.label}${n.suspect ? '<span class="badge">SUSPECT</span>' : ''}</div>
+      <div class="tv">${n.latest === null ? '\u2014' : n.latest.toFixed(2) + ' \u00b0C'}</div>
+      <div class="dv">${dev === null ? '' :
+        (Math.abs(dev) < 0.05 ? 'agrees with the others'
+         : (dev > 0 ? '+' : '') + dev.toFixed(2) + ' \u00b0C from the median')}</div>
+    </div>`;
+  }).join('');
+
+  $('truckNote').textContent = t.suspects.length
+    ? 'A node that disagrees with the others is called a suspect sensor, and its '
+      + 'temperature alerts are held back. The load is not reported as spoiling '
+      + 'because one thermometer drifted.'
+    : 'All nodes agree. A real excursion shows up on every line at once — that is '
+      + 'how it is told apart from a failing sensor.';
+
+  const sig = t.nodes.map(n => n.device + ':' + n.series.length).join('|');
+  if (sig === truckSig) return;
+  truckSig = sig;
+
+  const labels = t.nodes[0].series.map(p => fmtClock(p.ts));
+  const series = t.nodes.map((n, i) => ({
+    label: n.label,
+    points: n.series.map(p => p.t),
+    colour: n.suspect ? '#c00000' : NODE_COLOURS[i % 5],
+    dashed: n.suspect,
+  }));
+
+  if (window.Chart){
+    if (!chartN){
+      chartN = new Chart($('chartN'), {
+        type:'line',
+        data:{labels:[], datasets:series.map(x => ({
+          label:x.label, data:[], borderColor:x.colour, borderWidth:1.6,
+          borderDash:x.dashed ? [5,3] : [], tension:.25, pointRadius:0 }))},
+        options:{responsive:true, maintainAspectRatio:false, animation:false,
+          interaction:{mode:'index', intersect:false},
+          plugins:{legend:{display:true, labels:{boxWidth:10, font:{size:10}}}},
+          scales:{x:{ticks:{maxTicksLimit:9, font:{size:10}}, grid:{display:false}},
+                  y:{ticks:{font:{size:10}}, grid:{color:'#eef2f6'},
+                     title:{display:true, text:'\u00b0C', font:{size:10}}}}}
+      });
+    }
+    chartN.data.labels = labels;
+    series.forEach((x, i) => {
+      if (!chartN.data.datasets[i]) return;
+      chartN.data.datasets[i].data = x.points;
+      chartN.data.datasets[i].borderColor = x.colour;
+      chartN.data.datasets[i].borderDash = x.dashed ? [5,3] : [];
+    });
+    chartN.update('none');
+  } else {
+    multiline($('chartN'), series);
+  }
+}
+
+// the offline renderer, several series at once
+function multiline(cv, series){
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth || cv.parentNode.clientWidth || 640;
+  const h = cv.clientHeight || 200;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  g.clearRect(0, 0, w, h);
+
+  const all = series.flatMap(s => s.points).filter(v => v !== null && v !== undefined);
+  if (!all.length) return;
+  let min = Math.min(...all), max = Math.max(...all);
+  const pad = (max - min) * 0.12 || 1; min -= pad; max += pad;
+  const L = 42, R = 8, T = 8, B = 26;
+  const n = Math.max(...series.map(s => s.points.length));
+  const X = i => L + (w - L - R) * (i / Math.max(n - 1, 1));
+  const Y = v => T + (h - T - B) * (1 - (v - min) / (max - min));
+
+  g.strokeStyle = '#eef2f6'; g.lineWidth = 1;
+  g.fillStyle = '#5a7480'; g.font = '10px Segoe UI, sans-serif';
+  for (let k = 0; k <= 4; k++){
+    const v = min + (max - min) * k / 4, y = Y(v);
+    g.beginPath(); g.moveTo(L, y); g.lineTo(w - R, y); g.stroke();
+    g.fillText(v.toFixed(1), 4, y + 3);
+  }
+
+  series.forEach(s => {
+    g.strokeStyle = s.colour; g.lineWidth = 1.6;
+    g.setLineDash(s.dashed ? [5,3] : []);
+    g.beginPath();
+    let started = false;
+    s.points.forEach((v, i) => {
+      if (v === null || v === undefined){ started = false; return; }
+      if (!started){ g.moveTo(X(i), Y(v)); started = true; }
+      else g.lineTo(X(i), Y(v));
+    });
+    g.stroke(); g.setLineDash([]);
+  });
+
+  let lx = L;
+  series.forEach(s => {
+    g.fillStyle = s.colour; g.fillRect(lx, h - 12, 9, 9);
+    g.fillStyle = '#16212e'; g.font = '10px Segoe UI, sans-serif';
+    g.fillText(s.label, lx + 13, h - 4);
+    lx += 13 + g.measureText(s.label).width + 14;
+  });
+}
+
+async function loadLife(shipmentId){
+  if (!shipmentId) return;
+  let d;
+  try { d = await (await fetch('/api/shelflife/' + encodeURIComponent(shipmentId))).json(); }
+  catch(e){ return; }
+  if (!d.ok) return;
+  $('lifeCard').hidden = false;
+
+  const tile = (n, k, colour) =>
+    `<div class="tile"><div class="n"${colour ? ` style="color:${colour}"` : ''}>${n}</div>
+     <div class="k">${k}</div></div>`;
+  $('lifeStats').innerHTML =
+      tile(d.remaining_pct + '%', 'shelf life left',
+           d.remaining_pct < 60 ? '#c0500f' : '#1e7145')
+    + tile(d.remaining_days, 'days remaining')
+    + tile(d.days_lost_to_warmth, 'days lost to warmth',
+           d.days_lost_to_warmth > 0 ? '#c0500f' : null)
+    + tile(d.minutes_above_agreed, 'min above ' + d.agreed_range_c[1] + '°C');
+
+  const g = d.diagnosis;
+  const sev = {'cooling failure':'high', 'suspect sensor':'medium',
+               'extended excursion':'medium'}[g.kind] || 'info';
+  $('diag').className = 'alert ' + sev;
+  $('diag').innerHTML = `<div class="h">${g.kind}</div><div class="m">${g.why}</div>`
+    + (g.action ? `<div class="t">${g.action}</div>` : '');
+
+  $('lifeNote').textContent =
+    d.model + '. ' + d.caveat
+    + (d.agreed_is_warmer_than_ideal
+       ? ` Note: the agreed range (${d.agreed_range_c[0]}–${d.agreed_range_c[1]} °C) `
+         + `is warmer than this commodity's ideal `
+         + `(${d.commodity_ideal_c[0]}–${d.commodity_ideal_c[1]} °C), so it is `
+         + `losing life even while inside the contracted band.`
+       : '');
+}
+
+// Always the full walk: every record re-derived from the bytes the device
+// signed. A resumed check would trust a mark stored in the same database, and
+// a refresh that trusted it could paint "intact" over an edit made before it.
+// About 60 ms for 4,000 records, so it is affordable every few seconds.
+async function verify(){
+  if (!DEVICE) return;
+  const v = await (await api('/api/verify/' + DEVICE + '?full=true')).json();
+  $('v-n').textContent = v.records;
+  $('v-ok').innerHTML = v.ok
+    ? `<span class="ok">yes</span> <span class="note">(all ${v.checked_now} re-derived)</span>`
+    : `<span class="bad">BROKEN at ${v.broken_at}</span> <span class="note">${esc(v.detail || v.reason || '')}</span>`;
+  $('v-gaps').textContent = v.declared_gaps.length
+    ? v.declared_gaps.map(g => `${g.from}–${g.to}`).join(', ')
+    : 'none';
+  $('v-root').textContent = v.root || '—';
+  $('t-chain').innerHTML = v.ok
+    ? '<span class="ok" style="font-size:20px">intact</span>'
+    : '<span class="bad" style="font-size:20px">broken</span>';
+}
+
+$('btn-verify').onclick = verify;
+
+$('btn-anchor').onclick = async () => {
+  const r = await api('/api/anchor/' + DEVICE, {method:'POST'});
+  const j = await r.json();
+  alert(r.ok
+    ? `Anchored records ${j.from_seq}–${j.to_seq}\n\nMerkle root:\n${j.root}\n\n`
+      + `Ledger: ${j.backend}${j.distributed ? ' (distributed)' : ''}\n${j.note}`
+    : `Could not anchor: ${j.detail}`);
+};
+
+async function currentShipment(){
+  const s = await (await api('/api/state?device=' + DEVICE)).json();
+  return s.shipment ? s.shipment.shipment_id : null;
+}
+
+$('btn-epcis').onclick = async () => {
+  const id = await currentShipment();
+  if (id) window.open('/api/epcis/' + encodeURIComponent(id), '_blank');
+};
+
+$('btn-trace').onclick = async () => {
+  const id = await currentShipment();
+  if (id) window.open('/t/' + encodeURIComponent(id), '_blank');
+};
+
+$('btn-label').onclick = async () => {
+  const id = await currentShipment();
+  if (id) window.open('/label/' + encodeURIComponent(id), '_blank');
+};
+
+async function tick(){
+  try{
+    const q = DEVICE ? ('?device=' + DEVICE) : '';
+    const s = await (await api('/api/state' + q)).json();
+    if (s.waiting){ $('sub').textContent = 'waiting for a node…'; return; }
+    DEVICE = s.device;
+    // Keep the dropdown on the consignment actually drawn. On first load the
+    // two used to disagree: the list defaulted to its first entry while the
+    // state defaulted to the lowest device id.
+    const sel = $('shipSel');
+    if (sel.value !== String(DEVICE) && [...sel.options].some(o => o.value === String(DEVICE)))
+      sel.value = String(DEVICE);
+    draw(s);
+    loadShipments();
+    loadLife(s.shipment ? s.shipment.shipment_id : null);
+  }catch(e){ /* server restarting; try again next tick */ }
+}
+
+// ── charts ───────────────────────────────────────────────────────────────
+// Try a local copy of Chart.js first, then the CDN. If neither is reachable —
+// which is exactly what happens on bad venue Wi-Fi — fall back to drawing the
+// lines by hand. A demo that dies because a CDN is unreachable is not a demo.
+function loadScript(src){
+  return new Promise((ok, fail) => {
+    const el = document.createElement('script');
+    el.src = src; el.onload = ok; el.onerror = fail;
+    document.head.appendChild(el);
+  });
+}
+
+async function loadChartJs(){
+  for (const src of ['/static/chart.umd.min.js',
+                     'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js']){
+    try { await loadScript(src); if (window.Chart) return true; } catch(e){}
+  }
+  return false;
+}
+
+// The hand-drawn fallback. Same story: blue is live, orange was held.
+function line(cv, pts, lo, hi, unit, colourLate){
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth || cv.parentNode.clientWidth || 640;
+  const h = cv.clientHeight || 200;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  g.clearRect(0, 0, w, h);
+
+  const vals = pts.map(p => p.v).filter(v => v !== null && v !== undefined);
+  if (!vals.length) return;
+  let min = Math.min(...vals, lo ?? Infinity), max = Math.max(...vals, hi ?? -Infinity);
+  const pad = (max - min) * 0.12 || 1; min -= pad; max += pad;
+  const L = 42, R = 8, T = 8, B = 18;
+  const X = i => L + (w - L - R) * (i / Math.max(pts.length - 1, 1));
+  const Y = v => T + (h - T - B) * (1 - (v - min) / (max - min));
+
+  g.strokeStyle = '#eef2f6'; g.lineWidth = 1;
+  g.fillStyle = '#5a7480'; g.font = '10px Segoe UI, sans-serif';
+  for (let k = 0; k <= 4; k++){
+    const v = min + (max - min) * k / 4, y = Y(v);
+    g.beginPath(); g.moveTo(L, y); g.lineTo(w - R, y); g.stroke();
+    g.fillText(v.toFixed(1), 4, y + 3);
+  }
+  if (lo !== null && hi !== null){
+    g.save(); g.setLineDash([4, 4]); g.strokeStyle = '#c9d6e2';
+    [lo, hi].forEach(v => { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(w - R, Y(v)); g.stroke(); });
+    g.restore();
+  }
+
+  g.lineWidth = 1.8; g.lineJoin = 'round';
+  for (let i = 1; i < pts.length; i++){
+    const a = pts[i-1], b = pts[i];
+    if (a.v === null || b.v === null) continue;
+    g.strokeStyle = colourLate && b.late ? LATE : (colourLate ? LIVE : '#1e7145');
+    g.beginPath(); g.moveTo(X(i-1), Y(a.v)); g.lineTo(X(i), Y(b.v)); g.stroke();
+  }
+  g.fillStyle = '#5a7480';
+  g.fillText(unit, L, h - 5);
+}
+
+function drawPlain(s, lo, hi){
+  line($('chartT'), s.series.map(p => ({v:p.t, late:p.lag > 0})), lo, hi, '\u00b0C', true);
+  line($('chartE'), s.series.map(p => ({v:p.e})), null, null, 'ppb', false);
+  $('e-note').textContent = s.series.some(p => p.e !== null)
+    ? 'Ethylene as this node reported it. The current board has no ethylene sensor, so on today\'s hardware these values can only come from the simulator run with --ethylene: treat them as a demonstration, not a measurement.'
+    : 'No ethylene sensor fitted on this node.';
+}
+
+(async () => {
+  if (await loadChartJs()) {
+    makeCharts();
+  } else {
+    console.warn('Chart.js unavailable — drawing charts directly.');
+    const n = document.createElement('p');
+    n.className = 'note';
+    n.textContent = 'Offline: charts drawn without Chart.js. For the full version, '
+      + 'save chart.umd.min.js into backend/static/.';
+    $('chartT').parentNode.appendChild(n);
+  }
+  if (!TOKEN) { showGate(); }
+  else { loadShipments(); tick(); verify(); }
+  setInterval(() => { if (TOKEN) tick(); }, 1000);
+  setInterval(() => { if (TOKEN) verify(); }, 10000);
+})();
+</script>
+</body>
+</html>

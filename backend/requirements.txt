@@ -1,0 +1,4 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pyserial>=3.5      # only needed for bridge_serial.py, once a board exists
+segno>=1.6
