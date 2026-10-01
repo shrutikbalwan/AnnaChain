@@ -1,4 +1,18 @@
 # AnnaChain — for when you do not want to install PlatformIO yet.
+
+# Windows or not. mingw32-make on Windows runs recipes through cmd.exe (unless
+# an sh.exe happens to be on PATH), and cmd.exe cannot run ./fleet: "'.' is not
+# recognized". A bare fleet.exe usually works, because cmd.exe looks in the
+# current directory first, but NOT when NoDefaultCurrentDirectoryInExePath is
+# set (some hardened and IDE terminals set it), so the path is explicit,
+# dot-backslash, spelt with subst because a trailing backslash continues a line.
+ifeq ($(OS),Windows_NT)
+  EXE := .exe
+  RUN := $(subst /,\,./)
+else
+  EXE :=
+  RUN := ./
+endif
 CXX ?= g++
 
 # Which Python. `make PY=...` always wins. Otherwise the first of python3 and
@@ -25,15 +39,15 @@ CORE = lib/ac/ac_sha256.cpp lib/ac/ac_record.cpp lib/ac/ac_node.cpp \
 all: test demo
 
 demo: $(CORE) native/main.cpp
-	$(CXX) $(FLAGS) -DAC_NATIVE=1 $^ -o demo
-	./demo
+	$(CXX) $(FLAGS) -DAC_NATIVE=1 $^ -o demo$(EXE)
+	$(RUN)demo$(EXE)
 
 # Both suites. Either one going red means a claim on the deck is wrong.
 test: firmware-test backend-test
 
 firmware-test: $(CORE) tools/selftest.cpp
-	$(CXX) $(FLAGS) $^ -o selftest
-	./selftest
+	$(CXX) $(FLAGS) $^ -o selftest$(EXE)
+	$(RUN)selftest$(EXE)
 
 backend-test:
 	@echo "backend tests with: $(PY)  (override: make PY=python)"
@@ -43,15 +57,15 @@ backend-test:
 # server refuses readings older than a node could have held them, so replay it
 # soon after making it. Add --ethylene only if you will say it is simulated.
 capture: $(CORE) tools/dump.cpp
-	$(CXX) $(FLAGS) $^ -o dump
-	./dump 1000 350 > demo.capture
-	@echo "now:  $(PY) backend/feed_sim.py demo.capture --reset"
+	$(CXX) $(FLAGS) $^ -o dump$(EXE)
+	$(RUN)dump$(EXE) 1000 350 > demo.capture
+	@echo now:  $(PY) backend/feed_sim.py demo.capture --reset
 
 # three nodes on one truck, one sensor drifting
 fleet: $(CORE) tools/fleet.cpp
-	$(CXX) $(FLAGS) $^ -o fleet
-	./fleet 300 120 > fleet.capture
-	@echo "now:  $(PY) backend/feed_sim.py fleet.capture --reset"
+	$(CXX) $(FLAGS) $^ -o fleet$(EXE)
+	$(RUN)fleet$(EXE) 300 120 > fleet.capture
+	@echo now:  $(PY) backend/feed_sim.py fleet.capture --reset
 
 serve:
 	$(PY) -m uvicorn backend.app:app --host 0.0.0.0 --port 8000
@@ -75,10 +89,10 @@ demo-seed: clean
 
 # Run this before every demo. A database left over from testing carries
 # whatever was done to it: re-keyed devices, declared gaps, test nodes.
+# tools/clean.py, not rm: rm is not a Windows command. It names every file it
+# cannot remove and fails, and if that file is the database it says the
+# server is still running, which is always why.
 clean:
-	rm -f demo selftest dump fleet *.exe *.capture records.jsonl \
-	      backend/annachain.db backend/annachain.db-wal backend/annachain.db-shm \
-	      seed.capture \
-	      backend/ledger.jsonl
+	$(PY) tools/clean.py
 
 .PHONY: all demo test firmware-test backend-test capture fleet serve demo-full demo-seed clean
